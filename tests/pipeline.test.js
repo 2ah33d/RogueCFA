@@ -139,3 +139,47 @@ test('findMatchingYtVideo matches Market Outlook titles with target date', async
   assert.equal(match.videoId, 'O8OTYPsSkyk', 'Must match videoId O8OTYPsSkyk');
 });
 
+test('extracts and sorts available audio dates from Supabase Storage file objects', () => {
+  const fileObjects = [
+    { name: 'marketcall-2026-09-02.m4a' },
+    { name: 'marketcall-2026-09-04.m4a' },
+    { name: 'marketcall-2026-09-03.m4a' },
+    { name: 'irrelevant_file.txt' },
+  ];
+  const dates = fileObjects
+    .map((f) => f.name?.match(/marketcall-(\d{4}-\d{2}-\d{2})\.m4a/)?.[1])
+    .filter(Boolean)
+    .sort()
+    .reverse();
+
+  assert.deepEqual(dates, ['2026-09-04', '2026-09-03', '2026-09-02'], 'Must accurately extract and sort audio dates in reverse chronological order');
+});
+
+test('7-calendar-day rolling retention preserves 5 weekday broadcast episodes across weekends', () => {
+  // Simulate checking files on Friday 2026-09-04 with a 7-day cutoff (2026-08-28)
+  const simulatedNowUtc = new Date('2026-09-04T18:00:00Z');
+  const cutoffDate = new Date(simulatedNowUtc.getTime() - 7 * 86400 * 1000).toISOString().split('T')[0];
+
+  assert.equal(cutoffDate, '2026-08-28');
+
+  // Monday through Friday episodes of the current week must ALL be preserved
+  const currentWeekEpisodes = [
+    'marketcall-2026-08-31.m4a', // Monday
+    'marketcall-2026-09-01.m4a', // Tuesday
+    'marketcall-2026-09-02.m4a', // Wednesday
+    'marketcall-2026-09-03.m4a', // Thursday
+    'marketcall-2026-09-04.m4a', // Friday
+  ];
+
+  for (const ep of currentWeekEpisodes) {
+    const fileDate = ep.match(/marketcall-(\d{4}-\d{2}-\d{2})\.m4a/)[1];
+    assert.ok(fileDate >= cutoffDate, `${ep} should be retained inside the rolling 7-day window`);
+  }
+
+  // An episode older than 7 days should be pruned
+  const oldEp = 'marketcall-2026-08-27.m4a';
+  const oldFileDate = oldEp.match(/marketcall-(\d{4}-\d{2}-\d{2})\.m4a/)[1];
+  assert.ok(oldFileDate < cutoffDate, `${oldEp} should be marked for pruning`);
+});
+
+

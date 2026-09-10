@@ -106,6 +106,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
   const [error, setError] = useState(null);
   const [hasAttempted, setHasAttempted] = useState(false);
   const [historyEpisodes, setHistoryEpisodes] = useState([]);
+  const [availableAudioDates, setAvailableAudioDates] = useState([]);
   /* Async polling state */
   const [activeJobId, setActiveJobId] = useState(null);
   const [pollingElapsed, setPollingElapsed] = useState(0);
@@ -148,12 +149,34 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
       .then((data) => {
         if (data && Array.isArray(data.history)) {
           setHistoryEpisodes(data.history);
+          if (Array.isArray(data.availableAudioDates)) {
+            setAvailableAudioDates(data.availableAudioDates);
+          }
           const validDates = new Set(data.history.filter((h) => h && h.digest).map((h) => h.episodeDate));
-          if (cached && cached.episodeDate && !validDates.has(cached.episodeDate)) {
+          const newestValid = data.history.find((h) => h && h.digest);
+
+          /* 1. Stale Cache Auto-Advance: If the DB has a newer completed episode than what was cached in localStorage, auto-advance to it! */
+          if (newestValid && (!cached?.episodeDate || newestValid.episodeDate > cached.episodeDate)) {
+            setDigest(newestValid.digest);
+            setSelectedDate(newestValid.episodeDate);
+            setVideoInfo({
+              videoId: newestValid.videoId || '',
+              videoTitle: newestValid.videoTitle || `BNN Bloomberg MarketCall (${newestValid.episodeDate})`,
+              episodeDate: newestValid.episodeDate,
+            });
+            const updatedCache = {
+              digest: newestValid.digest,
+              videoId: newestValid.videoId || '',
+              videoTitle: newestValid.videoTitle || `BNN Bloomberg MarketCall (${newestValid.episodeDate})`,
+              episodeDate: newestValid.episodeDate,
+              generatedAt: newestValid.generatedAt,
+            };
+            saveDigestCache('latest_marketcall', updatedCache);
+            saveDigestCache(newestValid.episodeDate, updatedCache);
+          } else if (cached && cached.episodeDate && !validDates.has(cached.episodeDate)) {
             /* Row was deleted from DB — clear stale local storage cache */
             saveDigestCache('latest_marketcall', null);
             saveDigestCache(cached.episodeDate, null);
-            const newestValid = data.history.find((h) => h && h.digest);
             if (newestValid) {
               setDigest(newestValid.digest);
               setSelectedDate(newestValid.episodeDate);
@@ -312,6 +335,9 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
       .then((histData) => {
         if (histData && Array.isArray(histData.history)) {
           setHistoryEpisodes(histData.history);
+          if (Array.isArray(histData.availableAudioDates)) {
+            setAvailableAudioDates(histData.availableAudioDates);
+          }
 
           fetch('/api/goldengoose', {
             method: 'POST',
@@ -727,16 +753,31 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
           </div>
-          <div className="space-y-1.5">
-            <h3 className="text-xl font-bold text-prime">
-              {isUnsavedDate ? `Digest for ${selectedDate} is not saved yet` : 'BNN Bloomberg MarketCall Digest'}
-            </h3>
-            <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
-              {isUnsavedDate
-                ? `No saved MarketCall episode digest was found for ${selectedDate}. Click below if you would like to generate it.`
-                : "Click below to fetch and summarize today's episode audio stream with Groq Whisper & AI."}
-            </p>
-          </div>
+          {availableAudioDates.includes(selectedDate || todayStr) ? (
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs font-semibold mx-auto mb-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                <span>Broadcast Audio Ready in Storage</span>
+              </div>
+              <h3 className="text-xl font-bold text-prime">
+                MarketCall Audio Ready for {selectedDate || todayStr}
+              </h3>
+              <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
+                Live broadcast audio is stored in your rolling 5-day window. Click below to transcribe with Groq Whisper and generate an AI digest for this episode.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <h3 className="text-xl font-bold text-prime">
+                {isUnsavedDate ? `Digest for ${selectedDate} is not saved yet` : 'BNN Bloomberg MarketCall Digest'}
+              </h3>
+              <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
+                {isUnsavedDate
+                  ? `No saved MarketCall episode digest was found for ${selectedDate}. Click below if you would like to generate it.`
+                  : "Click below to fetch and summarize today's episode audio stream with Groq Whisper & AI."}
+              </p>
+            </div>
+          )}
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
@@ -746,7 +787,13 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              <span>{isUnsavedDate ? 'Click to Generate Digest' : "Check Newer / Generate Today's Digest"}</span>
+              <span>
+                {availableAudioDates.includes(selectedDate || todayStr)
+                  ? `Generate Digest for ${selectedDate || todayStr}`
+                  : isUnsavedDate
+                    ? 'Click to Generate Digest'
+                    : "Check Newer / Generate Today's Digest"}
+              </span>
             </button>
             <button
               type="button"
@@ -901,6 +948,13 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
   );
   const isEstimated = !realUsage;
 
+  /* Check if there is unparsed live audio in storage that is newer than current loaded episode */
+  const newerAudioDate = availableAudioDates.find((d) => {
+    const isNewer = d > (videoInfo?.episodeDate || selectedDate || '');
+    const isCompleted = historyEpisodes.some((h) => h.episodeDate === d && h.digest);
+    return isNewer && !isCompleted;
+  });
+
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 px-2 sm:px-4 animate-fade-in font-sans">
       {/* Top Header Control Bar — Clean layout with merged BNN Source & Action button */}
@@ -1020,6 +1074,43 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
           </div>
         )}
       </div>
+
+      {/* Fresh Audio Captured Banner */}
+      {newerAudioDate && (
+        <div className="bg-surface-card border border-accent/40 rounded-2xl p-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-antigravity animate-fade-in">
+          <div className="flex items-center gap-3">
+            <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse shrink-0" />
+            <div className="space-y-0.5">
+              <div className="text-xs font-bold text-prime flex items-center gap-2">
+                <span>Newer Live Audio Captured for {newerAudioDate}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 font-semibold">Supabase Stored</span>
+              </div>
+              <p className="text-[11px] text-dim font-normal">
+                You are currently viewing {videoInfo?.episodeDate}. Audio for {newerAudioDate} is stored in your rolling 5-day window and ready to transcribe.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDate(newerAudioDate);
+              setDigest(null);
+              setVideoInfo({
+                videoId: '',
+                videoTitle: `BNN Bloomberg MarketCall (${newerAudioDate})`,
+                episodeDate: newerAudioDate,
+              });
+              fetchDigest(false, newerAudioDate);
+            }}
+            className="px-4 py-2 bg-accent text-accent-text text-xs font-semibold rounded-full hover:bg-accent-hover transition-all cursor-pointer shadow-sm shrink-0 flex items-center gap-2"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span>Generate {newerAudioDate}</span>
+          </button>
+        </div>
+      )}
 
       {/* Golden Goose & Multi-Analyst Convergence Panel */}
       <GoldenGoosePanel

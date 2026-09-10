@@ -33,17 +33,33 @@ export default async function handler(req, res) {
     /* Fetch complete digests ordered by episode_date descending, then created_at descending */
     let data = null;
     let error = null;
+    let availableAudioDates = [];
 
     try {
-      const dbRes = await supabase
-        .from('digest_jobs')
-        .select('id, episode_date, video_id, video_title, result, created_at, updated_at')
-        .eq('status', 'complete')
-        .not('result', 'is', null)
-        .order('episode_date', { ascending: false })
-        .order('created_at', { ascending: false });
+      const [dbRes, storageRes] = await Promise.all([
+        supabase
+          .from('digest_jobs')
+          .select('id, episode_date, video_id, video_title, result, created_at, updated_at')
+          .eq('status', 'complete')
+          .not('result', 'is', null)
+          .order('episode_date', { ascending: false })
+          .order('created_at', { ascending: false }),
+        supabase.storage
+          .from('marketcall-audio')
+          .list('', { limit: 50 })
+          .catch(() => ({ data: [] })),
+      ]);
+
       data = dbRes.data;
       error = dbRes.error;
+
+      if (storageRes?.data && Array.isArray(storageRes.data)) {
+        availableAudioDates = storageRes.data
+          .map((f) => f.name?.match(/marketcall-(\d{4}-\d{2}-\d{2})\.m4a/)?.[1])
+          .filter(Boolean)
+          .sort()
+          .reverse();
+      }
     } catch (e) {
       error = e;
     }
@@ -113,6 +129,7 @@ export default async function handler(req, res) {
       limit,
       offset,
       history: paginated,
+      availableAudioDates,
     });
   } catch (err) {
     console.error('[marketcall-history] Handler exception:', err);

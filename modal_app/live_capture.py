@@ -19,7 +19,9 @@ app = modal.App("roguecfa-live-capture")
     # Runs Mon-Fri at 11:59 AM EST / 8:59 AM PST (captures 12:00 PM - 1:00 PM EST live broadcast)
     schedule=modal.Cron("59 11 * * 1-5", timezone="America/New_York"),
     timeout=3900,  # 65 minutes max execution time
-    secrets=[modal.Secret.from_name("roguecfa-secrets")]
+    secrets=[modal.Secret.from_name("roguecfa-secrets")],
+    nonpreemptible=True,  # Dedicated instance prevents cloud eviction mid-broadcast
+    retries=0,            # Never blindly retry/restart live capture after broadcast ends
 )
 def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rss: bool = True):
     stream_url = os.environ.get("BNN_LIVE_STREAM_URL") or "https://27153.live.streamtheworld.com/TV_BNN_ADP/HLS/playlist.m3u8"
@@ -33,13 +35,19 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
     if not supabase_url or not supabase_key:
         raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in modal.Secret('roguecfa-secrets')")
 
+    eastern_tz = None
+    now_et = None
+    try:
+        import zoneinfo
+        eastern_tz = zoneinfo.ZoneInfo("America/New_York")
+        now_et = datetime.datetime.now(eastern_tz)
+    except Exception:
+        pass
+
     if target_date and re.match(r"^\d{4}-\d{2}-\d{2}$", target_date):
         today_str = target_date
     else:
-        try:
-            import zoneinfo
-            eastern_tz = zoneinfo.ZoneInfo("America/New_York")
-            now_et = datetime.datetime.now(eastern_tz)
+        if now_et is not None:
             today_dt = now_et.date()
             if now_et.hour < 11:
                 today_dt -= datetime.timedelta(days=1)
@@ -48,8 +56,32 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
             elif today_dt.weekday() == 6: # Sunday -> Friday
                 today_dt -= datetime.timedelta(days=2)
             today_str = today_dt.strftime("%Y-%m-%d")
-        except Exception:
+        else:
             today_str = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=5)).strftime("%Y-%m-%d")
+
+    # Broadcast Ceiling Guard: Market Call strictly airs 12:00 PM - 1:00 PM Eastern Time.
+    # We allow a 1-minute buffer (13:01:00 ET). Any live stream capture MUST strictly end by 1:01 PM ET.
+    capture_duration = duration_secs
+    if now_et is not None:
+        target_end_et = now_et.replace(hour=13, minute=1, second=0, microsecond=0)
+        seconds_until_end = int((target_end_et - now_et).total_seconds())
+
+        if seconds_until_end <= 0:
+            raise RuntimeError(
+                f"Market Call broadcast for {today_str} has already ended at 1:00 PM ET "
+                f"(current time: {now_et.strftime('%H:%M:%S')} ET). "
+                f"Aborting live capture to prevent recording subsequent programming (Trading Day)."
+            )
+
+        if seconds_until_end < 900:  # Less than 15 minutes remaining
+            raise RuntimeError(
+                f"Insufficient broadcast time remaining ({seconds_until_end}s / {seconds_until_end // 60}m left before 1:01 PM ET). "
+                f"Market Call caller segment has already concluded. Aborting to prevent recording subsequent programming."
+            )
+
+        capture_duration = min(duration_secs, seconds_until_end)
+        print(f"Wall-clock guard: Current ET is {now_et.strftime('%H:%M:%S')}. "
+              f"Clamping capture duration to {capture_duration}s (ends at {target_end_et.strftime('%H:%M:%S')} ET).")
 
     raw_filename = "raw_marketcall.m4a"
     compressed_filename = f"marketcall-{today_str}.m4a"
@@ -124,7 +156,7 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
         if stream_url.endswith(".m3u8") and not stream_url.startswith("hls://"):
             target_stream_url = f"hls://{stream_url}"
 
-        print(f"Attempting live stream capture via Streamlink ({target_stream_url})...")
+        print(f"Attempting live stream capture via Streamlink ({target_stream_url}) for {capture_duration}s...")
         streamlink_cmd = [
             "streamlink",
             "--http-header", "Referer=https://www.bnnbloomberg.ca/",
@@ -134,14 +166,14 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
             "-o", raw_filename
         ]
         try:
-            subprocess.run(streamlink_cmd, timeout=duration_secs + 15, check=True)
+            subprocess.run(streamlink_cmd, timeout=capture_duration + 15, check=True)
             capture_success = True
         except subprocess.TimeoutExpired:
-            # TimeoutExpired after duration_secs means Streamlink recorded for the
+            # TimeoutExpired after capture_duration means Streamlink recorded for the
             # full intended duration — the output file should already be on disk.
             if os.path.isfile(raw_filename) and os.path.getsize(raw_filename) > 1_000_000:
                 file_mb = os.path.getsize(raw_filename) / (1024 * 1024)
-                print(f"Streamlink timed out as expected after {duration_secs}s. "
+                print(f"Streamlink timed out as expected after {capture_duration}s. "
                       f"Output file exists ({file_mb:.1f} MB) — treating as successful capture.")
                 capture_success = True
             else:
@@ -152,6 +184,18 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
 
         # FFmpeg fallback: only attempt if Streamlink didn't produce a usable file
         if not capture_success:
+            # Re-evaluate wall-clock ceiling so FFmpeg never bleeds into Trading Day
+            seconds_left_in_broadcast = 3600
+            if eastern_tz is not None:
+                now_fallback_et = datetime.datetime.now(eastern_tz)
+                target_end_fallback_et = now_fallback_et.replace(hour=13, minute=1, second=0, microsecond=0)
+                seconds_left_in_broadcast = int((target_end_fallback_et - now_fallback_et).total_seconds())
+                if seconds_left_in_broadcast < 180:
+                    raise RuntimeError(
+                        f"Market Call broadcast has concluded (current time: {now_fallback_et.strftime('%H:%M:%S')} ET). "
+                        f"Aborting FFmpeg fallback to prevent capturing subsequent programming."
+                    )
+
             elapsed = _time.monotonic() - _capture_start
             remaining = MODAL_TIMEOUT - elapsed - SAFETY_MARGIN
             if remaining < 120:
@@ -159,9 +203,9 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
                     f"Not enough time remaining for FFmpeg fallback "
                     f"({remaining:.0f}s left, need at least 120s). "
                     f"Streamlink consumed {elapsed:.0f}s.")
-            ffmpeg_duration = min(int(remaining), duration_secs)
+            ffmpeg_duration = min(int(remaining), capture_duration, seconds_left_in_broadcast)
             print(f"Attempting direct FFmpeg capture fallback "
-                  f"({ffmpeg_duration}s budget, {remaining:.0f}s remaining before Modal timeout)...")
+                  f"({ffmpeg_duration}s budget, {remaining:.0f}s before Modal timeout, {seconds_left_in_broadcast}s before broadcast end)...")
             try:
                 ffmpeg_cmd = [
                     "ffmpeg", "-y",
@@ -214,9 +258,9 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
     public_audio_url = f"{supabase_url.rstrip('/')}/storage/v1/object/public/{bucket_name}/{compressed_filename}"
     print(f"Supabase Storage Upload complete! Public URL: {public_audio_url}")
 
-    # Step 4: Prune Supabase Storage audio files older than 2 days (keeps storage safely under ~42 MB total)
+    # Step 4: Prune Supabase Storage audio files older than 7 calendar days (accumulates rolling 5 broadcast days, ~115 MB total)
     try:
-        print(f"Checking '{bucket_name}' bucket for files older than 2 days...")
+        print(f"Checking '{bucket_name}' bucket for files older than 7 days (rolling 5 broadcast day window)...")
         list_url = f"{supabase_url.rstrip('/')}/storage/v1/object/list/{bucket_name}"
         list_res = requests.post(
             list_url,
@@ -229,7 +273,7 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
         )
         if list_res.ok:
             objects = list_res.json()
-            cutoff_date = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=2)).strftime("%Y-%m-%d")
+            cutoff_date = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
             to_delete = []
             for obj in objects:
                 name = obj.get("name", "")
@@ -395,13 +439,8 @@ def check_and_purge_rss():
                     )
                     print(f"Updated digest_jobs row '{job_id}' audioUrl to RSS MP3.")
 
-            # Delete .m4a file from Supabase Storage
-            delete_url = f"{supabase_url.rstrip('/')}/storage/v1/object/{bucket_name}"
-            del_res = requests.delete(
-                delete_url,
-                headers={"Authorization": f"Bearer {supabase_key}", "Content-Type": "application/json"},
-                json={"prefixes": [name]},
-                timeout=15
-            )
-            print(f"Purged '{name}' from Supabase Storage (Status: {del_res.status_code}). Storage now 0 MB!")
+            # Note: Do not immediately purge .m4a from Supabase Storage.
+            # Retain audio up to the rolling 7-day window so users can generate day-accurate digests
+            # for up to 5 days if they check in late during the week.
+            print(f"Retaining live audio '{name}' in Supabase Storage (managed by 7-day rolling pruning window).")
 

@@ -10,6 +10,7 @@
    - Triggers analyst track record processing & cold-start capture.
    ════════════════════════════════════════════════════════════════ */
 
+import { waitUntil } from '@vercel/functions';
 import { supabase } from './_supabaseClient.js';
 import {
   createTimer,
@@ -86,14 +87,14 @@ export default async function handler(req, res) {
       console.warn('[api/ingest] Supabase audio notification upsert warning:', dbErr.message);
     }
 
-    /* Auto-trigger the full digest pipeline (transcription + LLM digest) — fire-and-forget */
+    /* Auto-trigger the full digest pipeline (transcription + LLM digest) — keep-alive with waitUntil */
     try {
       const activeSecret = validSecrets[0] || 'roguecfa_live_secret_key_2026';
       const protocol = req.headers['x-forwarded-proto'] || 'https';
       const host = req.headers.host || 'roguecfa.vercel.app';
       const processUrl = `${protocol}://${host}/api/marketcall-process`;
       console.log(`[api/ingest] Auto-triggering digest pipeline at ${processUrl} for ${todayStr}`);
-      fetch(processUrl, {
+      const triggerPromise = fetch(processUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,9 +109,17 @@ export default async function handler(req, res) {
           force: true,
         }),
         signal: AbortSignal.timeout(290000),
-      }).catch((triggerErr) => {
-        console.warn('[api/ingest] Auto-trigger digest pipeline warning:', triggerErr.message);
-      });
+      })
+        .then((res) => {
+          console.log(`[api/ingest] Auto-trigger pipeline responded with status: ${res.status}`);
+        })
+        .catch((triggerErr) => {
+          console.warn('[api/ingest] Auto-trigger digest pipeline warning:', triggerErr.message);
+        });
+
+      if (typeof waitUntil === 'function') {
+        waitUntil(triggerPromise);
+      }
     } catch (triggerErr) {
       console.warn('[api/ingest] Failed to auto-trigger digest pipeline:', triggerErr.message);
     }

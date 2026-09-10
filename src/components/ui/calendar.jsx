@@ -22,6 +22,7 @@ export function Calendar({
   selectedDate,
   onDateSelect,
   savedDates = [],
+  audioDates = [],
   className = '',
 }) {
   // Parse initial selected date or default to today
@@ -72,6 +73,7 @@ export function Calendar({
   };
 
   const savedSet = useMemo(() => new Set(savedDates), [savedDates]);
+  const audioSet = useMemo(() => new Set(audioDates), [audioDates]);
 
   return (
     <div
@@ -135,7 +137,7 @@ export function Calendar({
         ))}
       </div>
 
-      {/* Days Grid — 32px circular buttons with green dots inside near the bottom */}
+      {/* Days Grid — 32px circular buttons with green/blue dots inside near the bottom */}
       <div className="grid grid-cols-7 gap-y-1 gap-x-1 text-center py-1">
         {calendarDays.map((day) => {
           const dateKey = format(day, 'yyyy-MM-dd');
@@ -143,6 +145,7 @@ export function Calendar({
           const isCurrentMonth = isSameMonth(day, currentMonth);
           const isCurrentDay = isToday(day);
           const hasSavedEpisode = savedSet.has(dateKey);
+          const hasAudioReady = audioSet.has(dateKey) && !hasSavedEpisode;
 
           return (
             <div key={dateKey} className="flex items-center justify-center h-9 w-full">
@@ -170,11 +173,11 @@ export function Calendar({
                   }
                 )}
               >
-                <span className={cn('leading-none', hasSavedEpisode && 'pb-1')}>
+                <span className={cn('leading-none', (hasSavedEpisode || hasAudioReady) && 'pb-1')}>
                   {format(day, 'd')}
                 </span>
 
-                {/* Green Save Dot — Inside the bottom of the circle */}
+                {/* Green Save Dot — Saved Episode Available */}
                 {hasSavedEpisode && (
                   <span
                     className={cn(
@@ -182,6 +185,17 @@ export function Calendar({
                       isSelected ? 'bg-white' : 'bg-emerald-400 shadow-sm shadow-emerald-400/80'
                     )}
                     title="Saved Episode Available"
+                  />
+                )}
+
+                {/* Sky-Blue Pulse Dot — Live Audio Ready to Generate */}
+                {hasAudioReady && (
+                  <span
+                    className={cn(
+                      'w-1.5 h-1.5 rounded-full absolute bottom-1 left-1/2 -translate-x-1/2 transition-colors',
+                      isSelected ? 'bg-white' : 'bg-sky-400 shadow-sm shadow-sky-400/80 animate-pulse'
+                    )}
+                    title="Audio Captured — Ready to Generate"
                   />
                 )}
               </button>

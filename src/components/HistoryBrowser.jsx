@@ -8,6 +8,7 @@ import Calendar from './ui/calendar';
  */
 export default function HistoryBrowser({ selectedDate, onSelectDigest, className = '' }) {
   const [history, setHistory] = useState([]);
+  const [audioDates, setAudioDates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -21,6 +22,9 @@ export default function HistoryBrowser({ selectedDate, onSelectDigest, className
       .then((data) => {
         if (data && Array.isArray(data.history)) {
           setHistory(data.history);
+        }
+        if (data && Array.isArray(data.availableAudioDates)) {
+          setAudioDates(data.availableAudioDates);
         }
       })
       .catch((err) => {
@@ -100,6 +104,8 @@ export default function HistoryBrowser({ selectedDate, onSelectDigest, className
   const displayDate = selectedDate || (currentSelection ? currentSelection.episodeDate : 'Latest Episode');
   const savedDateStrings = historyList.map((h) => h.episodeDate);
 
+  const hasPendingAudio = audioDates.some((ad) => !history.some((h) => h.episodeDate === ad && h.digest));
+
   return (
     <div ref={dropdownRef} className={`relative text-xs font-sans ${className}`}>
       {/* Dropdown Toggle Pill - Clean surface-card background with NO white outline */}
@@ -107,7 +113,11 @@ export default function HistoryBrowser({ selectedDate, onSelectDigest, className
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="h-8 px-3.5 inline-flex items-center gap-2 bg-surface-card hover:bg-surface-elevated rounded-full text-xs font-medium text-prime shadow-antigravity transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer group"
+        title={hasPendingAudio ? "Newer episode audio ready to generate" : undefined}
       >
+        {hasPendingAudio && (
+          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse shrink-0" title="Audio ready to generate" />
+        )}
         <span className="text-xs font-semibold text-prime">{displayDate}</span>
         <span className="text-xs text-dim font-normal">· {history.length} Saved</span>
         <svg
@@ -135,6 +145,7 @@ export default function HistoryBrowser({ selectedDate, onSelectDigest, className
               selectedDate={selectedDate || todayStr}
               onDateSelect={handleCalendarDateSelect}
               savedDates={savedDateStrings}
+              audioDates={audioDates}
               className="border-surface-card/90"
             />
           </motion.div>
