@@ -24,6 +24,7 @@ import {
   extractJSON,
   getLatestMarketCallDateStr,
   findMatchingYtVideo,
+  parseDateFromTitle,
   sanitizeAnalystName,
   resolveAnalystName,
   detectConsecutiveDayDouble,
@@ -199,9 +200,13 @@ export default async function handler(req, res) {
         const existingRawText = savedJob?.result?.rawText || savedJob?.result?.raw_text || savedJob?.result?.text;
         if (existingRawText && existingRawText.length >= 200) {
           const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
-          const resolvedVideoId = matchingYtVid?.videoId || savedJob?.result?.videoId || '';
-          const resolvedVideoTitle = matchingYtVid?.videoTitle || savedJob?.video_title || savedJob?.result?.videoTitle || `BNN Bloomberg MarketCall (${targetDateStr})`;
-          const resolvedDescription = matchingYtVid?.description || savedJob?.result?.description || '';
+          const savedTitle = savedJob?.video_title || savedJob?.result?.videoTitle || '';
+          const savedDate = parseDateFromTitle(savedTitle);
+          const savedVideoMatchesDate = savedDate === targetDateStr;
+
+          const resolvedVideoId = matchingYtVid?.videoId || (savedVideoMatchesDate ? savedJob?.result?.videoId : '') || '';
+          const resolvedVideoTitle = matchingYtVid?.videoTitle || (savedVideoMatchesDate ? savedTitle : `BNN Bloomberg Market Call (Live Audio Capture - ${targetDateStr})`);
+          const resolvedDescription = matchingYtVid?.description || (savedVideoMatchesDate ? savedJob?.result?.description : '') || '';
 
           selectedVideo = {
             videoId: resolvedVideoId,
@@ -209,9 +214,10 @@ export default async function handler(req, res) {
             description: resolvedDescription,
             episodeDate: targetDateStr,
             source: 'database_transcript_cache',
+            youtubePending: !resolvedVideoId,
           };
           cleanedTranscript = cleanRawTranscript(existingRawText);
-          console.log(`[marketcall-process] Reusing pre-existing transcript from database for ${targetDateStr} (${cleanedTranscript.length} chars), videoId: ${resolvedVideoId}`);
+          console.log(`[marketcall-process] Reusing pre-existing transcript from database for ${targetDateStr} (${cleanedTranscript.length} chars), videoId: ${resolvedVideoId || '(pending)'}`);
         }
       } catch (cacheLookErr) {
         console.warn('[marketcall-process] Database transcript lookup failed:', cacheLookErr.message);
@@ -228,10 +234,11 @@ export default async function handler(req, res) {
         const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
         selectedVideo = {
           videoId: matchingYtVid?.videoId || '',
-          videoTitle: matchingYtVid?.videoTitle || rssResult.rssItemTitle || `BNN Bloomberg MarketCall (${targetDateStr})`,
+          videoTitle: matchingYtVid?.videoTitle || rssResult.rssItemTitle || `BNN Bloomberg Market Call (Live Audio Capture - ${targetDateStr})`,
           description: matchingYtVid?.description || '',
           episodeDate: rssResult.rssItemDate || targetDateStr,
           source: 'bnn_rss_podcast',
+          youtubePending: !matchingYtVid?.videoId,
         };
         cleanedTranscript = cleanRawTranscript(rssResult.text);
       } else if (rssResult && rssResult.groqDiagnostic) {
@@ -249,10 +256,11 @@ export default async function handler(req, res) {
         const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
         selectedVideo = {
           videoId: matchingYtVid?.videoId || '',
-          videoTitle: matchingYtVid?.videoTitle || storageAudioResult.rssItemTitle || `BNN Bloomberg MarketCall (${targetDateStr})`,
+          videoTitle: matchingYtVid?.videoTitle || storageAudioResult.rssItemTitle || `BNN Bloomberg Market Call (Live Audio Capture - ${targetDateStr})`,
           description: matchingYtVid?.description || '',
           episodeDate: targetDateStr,
           source: 'supabase_storage_live_audio',
+          youtubePending: !matchingYtVid?.videoId,
         };
         cleanedTranscript = cleanRawTranscript(storageAudioResult.text);
       }
@@ -282,10 +290,12 @@ export default async function handler(req, res) {
         if (timer.report().totalMs <= 240000) {
           const rssFallback = await fetchRssPodcastFallback('', timer);
           if (rssFallback && rssFallback.text && rssFallback.text.length >= 150) {
-            selectedVideo = candidateVideos[0] || {
+            const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
+            selectedVideo = matchingYtVid || {
               videoId: '',
-              videoTitle: 'BNN Bloomberg MarketCall (Audio/RSS Feed)',
-              episodeDate: todayStr,
+              videoTitle: `BNN Bloomberg Market Call (${targetDateStr})`,
+              episodeDate: targetDateStr,
+              youtubePending: true,
             };
             cleanedTranscript = cleanRawTranscript(rssFallback.text);
           }
@@ -309,7 +319,12 @@ export default async function handler(req, res) {
     }
 
     /* ── Step 6: Build prompt & call LLM ── */
-    const { systemPrompt, userPrompt } = buildDigestPrompt(cleanedTranscript, selectedVideo.videoTitle, selectedVideo.description);
+    const { systemPrompt, userPrompt } = buildDigestPrompt(
+      cleanedTranscript,
+      selectedVideo.videoTitle,
+      selectedVideo.description,
+      targetDateStr
+    );
     const rawLLMResponse = await callLLM(provider, llmKey, systemPrompt, userPrompt, timer);
     const llmText = typeof rawLLMResponse === 'string' ? rawLLMResponse : rawLLMResponse.text;
     const llmUsage = typeof rawLLMResponse === 'object' ? rawLLMResponse.usage : null;
@@ -374,11 +389,12 @@ export default async function handler(req, res) {
     const result = {
       digest,
       rawText: cleanedTranscript,
-      videoId: selectedVideo.videoId,
+      videoId: selectedVideo.videoId || '',
       videoTitle: selectedVideo.videoTitle,
       episodeDate: selectedVideo.episodeDate || targetDateStr,
+      youtubePending: Boolean(selectedVideo.youtubePending),
       generatedAt: new Date().toISOString(),
-      source: 'server',
+      source: selectedVideo.source || 'server',
       timing: timer.report(),
     };
 
@@ -402,7 +418,6 @@ export default async function handler(req, res) {
             const digestRows = picksList.map((p) => ({
               analyst_name: cleanGuest,
               ticker: (p.ticker || '').trim().toUpperCase(),
-              company_name: p.companyName || p.company_name || p.name || p.ticker,
               pick_publish_date: targetDateStr,
               then_price: typeof p.thenPrice === 'number' ? p.thenPrice : typeof p.price === 'number' ? p.price : 100,
               now_price: typeof p.nowPrice === 'number' ? p.nowPrice : typeof p.price === 'number' ? p.price : 100,

@@ -116,6 +116,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
   const stageRef = useRef('Initializing pipeline...');
 
   const [copied, setCopied] = useState(false);
+  const [isCheckingVideo, setIsCheckingVideo] = useState(false);
 
   /* Helper to format full digest into clean markdown text with stance flags */
   const handleCopyAllText = () => {
@@ -188,23 +189,22 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
             } else {
               setDigest(null);
             }
-          } else if (cached && cached.episodeDate) {
-            /* If DB now has a videoId for this cached date, sync it */
+            /* If DB has a different videoId (e.g. newly discovered, or stripped due to date mismatch), sync it */
             const matchingDBRow = data.history.find((h) => h.episodeDate === cached.episodeDate);
-            if (matchingDBRow && matchingDBRow.videoId && (!cached.videoId || cached.videoId !== matchingDBRow.videoId)) {
+            if (matchingDBRow && (cached.videoId || '') !== (matchingDBRow.videoId || '')) {
               setVideoInfo((prev) => ({
                 ...prev,
-                videoId: matchingDBRow.videoId,
+                videoId: matchingDBRow.videoId || '',
                 videoTitle: matchingDBRow.videoTitle || prev?.videoTitle,
               }));
               saveDigestCache(cached.episodeDate, {
                 ...cached,
-                videoId: matchingDBRow.videoId,
+                videoId: matchingDBRow.videoId || '',
                 videoTitle: matchingDBRow.videoTitle || cached.videoTitle,
               });
               saveDigestCache('latest_marketcall', {
                 ...cached,
-                videoId: matchingDBRow.videoId,
+                videoId: matchingDBRow.videoId || '',
                 videoTitle: matchingDBRow.videoTitle || cached.videoTitle,
               });
             }
@@ -218,6 +218,48 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     setDigest(null);
     setHasAttempted(false);
     setError(null);
+  };
+
+  const handleCheckVideo = async () => {
+    const targetDate = videoInfo?.episodeDate || selectedDate || todayStr;
+    setIsCheckingVideo(true);
+    try {
+      const youtubeKey = getYoutubeKey();
+      const res = await fetch('/api/marketcall-digest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          episodeDate: targetDate,
+          youtubeKey,
+          bypassCache: false,
+          force: false,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.videoId) {
+          setVideoInfo((prev) => ({
+            ...prev,
+            videoId: data.videoId,
+            videoTitle: data.videoTitle || prev?.videoTitle,
+          }));
+          if (data.digest) {
+            setDigest(data.digest);
+          }
+          saveDigestCache(targetDate, {
+            digest: data.digest || digest,
+            videoId: data.videoId,
+            videoTitle: data.videoTitle || videoInfo?.videoTitle,
+            episodeDate: targetDate,
+            generatedAt: data.generatedAt,
+          });
+        }
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setIsCheckingVideo(false);
+    }
   };
 
   const fetchDigest = useCallback(async (force = false, targetDate = null) => {
@@ -1066,16 +1108,29 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
           </div>
         ) : (
           <div className="flex items-center gap-3.5 bg-surface-card p-3 rounded-2xl shadow-antigravity shrink-0">
-            <div className="w-36 h-20 rounded-xl bg-surface-elevated/70 border border-dashed border-edge/60 flex flex-col items-center justify-center text-dim/60 shrink-0">
-              <svg className="w-6 h-6 text-faint mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-36 h-20 rounded-xl bg-surface-elevated/70 border border-dashed border-edge/60 flex flex-col items-center justify-center text-dim/60 shrink-0 p-2 text-center">
+              <svg className="w-5 h-5 text-faint mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
+              <span className="text-[10px] text-sky-400 font-semibold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                Audio Captured
+              </span>
             </div>
-            <div className="flex flex-col gap-0.5 pr-1 max-w-[170px]">
+            <div className="flex flex-col gap-1 pr-1 max-w-[170px]">
               <span className="text-[10px] uppercase tracking-wider font-semibold text-dim">Full Broadcast</span>
               <span className="text-xs font-medium text-dim/90 leading-snug">
-                YouTube Not Available Yet
+                YouTube Pending
               </span>
+              <button
+                type="button"
+                onClick={handleCheckVideo}
+                disabled={isCheckingVideo}
+                className="text-[11px] text-accent hover:text-accent-hover font-medium flex items-center gap-1 cursor-pointer transition-colors text-left"
+                title="Check if BNN Bloomberg uploaded today's video to YouTube"
+              >
+                {isCheckingVideo ? 'Checking...' : 'Check YouTube ↻'}
+              </button>
             </div>
           </div>
         )}

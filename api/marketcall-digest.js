@@ -18,6 +18,8 @@ import {
   getLatestMarketCallDateStr,
   findRecentMarketCallVideos,
   findMatchingYtVideo,
+  parseDateFromTitle,
+  resolveAnalystName,
   sanitizeAnalystName,
 } from './_pipeline.js';
 
@@ -151,21 +153,55 @@ export default async function handler(req, res) {
           .maybeSingle();
 
         if (cached && cached.result) {
-          /* Backfill YouTube videoId & analyst name if missing in cached result */
-          if (youtubeKey && (!cached.result.videoId || cached.result.videoId.trim() === '')) {
+          /* 1. Date Sanitization: If cached row has a video whose date contradicts targetDateStr, strip it */
+          const currentVTitle = cached.result.videoTitle || cached.video_title || '';
+          const parsedVDate = parseDateFromTitle(currentVTitle);
+          let sanitizedMismatch = false;
+          if (parsedVDate && parsedVDate !== targetDateStr) {
+            console.warn(`[marketcall-digest] Detected cross-episode video mismatch for ${targetDateStr} (video was for ${parsedVDate}). Stripping video.`);
+            cached.result.videoId = '';
+            cached.result.videoTitle = `BNN Bloomberg Market Call (Live Audio Capture - ${targetDateStr})`;
+            cached.result.youtubePending = true;
+            sanitizedMismatch = true;
+          }
+
+          /* 2. Backfill YouTube videoId & analyst name if missing / pending */
+          const effectiveYtKey = youtubeKey || process.env.CRON_YOUTUBE_KEY || process.env.YOUTUBE_API_KEY || '';
+          const isPending = !cached.result.videoId || cached.result.youtubePending;
+
+          if (isPending) {
             try {
-              let candidateVideos = (await findRecentMarketCallVideos(youtubeKey)) || [];
+              let candidateVideos = [];
+              if (effectiveYtKey) {
+                candidateVideos = (await findRecentMarketCallVideos(effectiveYtKey)) || [];
+              }
               if (candidateVideos.length === 0) {
                 const { discoverMarketCallVideos } = await import('./_youtubeFetcher.js');
-                candidateVideos = (await discoverMarketCallVideos(targetDateStr, youtubeKey)) || [];
+                candidateVideos = (await discoverMarketCallVideos(targetDateStr, effectiveYtKey)) || [];
               }
               const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
               if (matchingYtVid && matchingYtVid.videoId) {
                 cached.result.videoId = matchingYtVid.videoId;
                 cached.result.videoTitle = matchingYtVid.videoTitle || cached.result.videoTitle;
+                cached.result.youtubePending = false;
+
                 if (cached.result.digest && cached.result.digest.guest) {
-                  cached.result.digest.guest = sanitizeAnalystName(cached.result.digest.guest, matchingYtVid.videoTitle, matchingYtVid.description, '', targetDateStr);
+                  if (cached.result.digest.nameConfidence === 'audio_only' || !cached.result.digest.nameConfidence) {
+                    const resolved = resolveAnalystName(
+                      cached.result.digest.guest,
+                      matchingYtVid.videoTitle,
+                      matchingYtVid.description,
+                      '',
+                      targetDateStr
+                    );
+                    if (resolved.confidence === 'verified_youtube') {
+                      cached.result.digest.guest = resolved.name;
+                      cached.result.digest.nameConfidence = resolved.confidence;
+                      cached.result.digest.nameDisclaimer = null;
+                    }
+                  }
                 }
+
                 /* Persist updated result & video_id to Supabase */
                 supabase
                   .from('digest_jobs')
@@ -179,11 +215,24 @@ export default async function handler(req, res) {
                   .then(({ error }) => {
                     if (error) console.warn('[marketcall-digest] Failed to persist YouTube backfill:', error.message);
                   });
+              } else if (sanitizedMismatch) {
+                /* Persist the stripped videoId to database so it stays clean */
+                supabase
+                  .from('digest_jobs')
+                  .update({
+                    video_id: '',
+                    video_title: cached.result.videoTitle,
+                    result: cached.result,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', cached.id)
+                  .catch(() => {});
               }
             } catch (backfillErr) {
               console.warn('[marketcall-digest] YouTube backfill check failed:', backfillErr.message);
             }
           }
+
           return res.status(200).json(cached.result);
         }
       } catch (cacheErr) {

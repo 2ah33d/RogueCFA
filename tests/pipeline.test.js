@@ -291,4 +291,50 @@ test('detectConsecutiveDayDouble flags double guest and overlapping picks', asyn
   assert.equal(resultClean, null, 'Clean episode must not be flagged');
 });
 
+test('findMatchingYtVideo returns null when candidate video has loose publish timestamp but conflicting title date', async () => {
+  const { findMatchingYtVideo } = await import('../api/_pipeline.js');
+  const candidates = [
+    {
+      videoId: 'PXFk79okubo',
+      videoTitle: "Market Call: Ivana Delevska's outlook on Technology Stocks (Sept. 16, 2026)",
+      publishedAt: '2026-09-17T02:00:00Z', // Published in early UTC on Sept 17, but is Sept 16 show
+    },
+  ];
+  const match = findMatchingYtVideo(candidates, '2026-09-17');
+  assert.equal(match, null, 'Must reject video because title date (Sept. 16) contradicts target date (2026-09-17)');
+});
+
+test('buildDigestPrompt rejects mismatched video title date and instructs transcript extraction', async () => {
+  const { buildDigestPrompt } = await import('../api/_pipeline.js');
+  const transcript = 'Thanks for joining us today here on Market Call. Martin Cobb with us on the show. Senior Vice President Equities at Lauren Steinberg Wealth Management.';
+  
+  // Passed Sept 16 videoTitle for Sept 17 targetDateStr
+  const { systemPrompt, userPrompt } = buildDigestPrompt(
+    transcript,
+    "Market Call: Ivana Delevska's outlook on Technology Stocks (Sept. 16, 2026)",
+    '',
+    '2026-09-17'
+  );
+
+  assert.ok(systemPrompt.includes('Extract the guest\'s real full name and firm accurately from the host\'s introduction'), 'Must instruct LLM to extract from transcript');
+  assert.ok(!systemPrompt.includes('Ivana Delevska'), 'Must NOT inject Ivana Delevska into the prompt for Sept 17');
+  assert.ok(!userPrompt.includes('Ivana Delevska'), 'User prompt must NOT contain mismatched video title');
+  assert.ok(userPrompt.includes('(2026-09-17)'), 'User prompt must reference target date');
+});
+
+test('buildDigestPrompt accepts verified matching video title and sets verified official guest', async () => {
+  const { buildDigestPrompt } = await import('../api/_pipeline.js');
+  const transcript = 'Welcome to Market Call.';
+  
+  const { systemPrompt, userPrompt } = buildDigestPrompt(
+    transcript,
+    "Market Call: Ivana Delevska's outlook on Technology Stocks (Sept. 16, 2026)",
+    '',
+    '2026-09-16'
+  );
+
+  assert.ok(systemPrompt.includes('The verified official guest name for this episode is "Ivana Delevska"'));
+  assert.ok(userPrompt.includes("titled \"Market Call: Ivana Delevska's outlook on Technology Stocks (Sept. 16, 2026)\""));
+});
+
 

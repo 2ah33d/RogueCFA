@@ -1,4 +1,5 @@
 import { supabase } from './_supabaseClient.js';
+import { parseDateFromTitle } from './_pipeline.js';
 
 export default async function handler(req, res) {
   /* ── CORS ── */
@@ -111,11 +112,38 @@ export default async function handler(req, res) {
 
       if (!seenDates.has(dateKey)) {
         seenDates.add(dateKey);
+
+        let videoId = row.video_id || row.result?.videoId || '';
+        let videoTitle = row.video_title || row.result?.videoTitle || `BNN Bloomberg Market Call (${dateKey})`;
+        let youtubePending = Boolean(row.result?.youtubePending || !videoId);
+
+        /* Date verification: If video title has an explicit date that does NOT match dateKey, strip it! */
+        const titleDate = parseDateFromTitle(videoTitle);
+        if (titleDate && titleDate !== dateKey) {
+          videoId = '';
+          videoTitle = `BNN Bloomberg Market Call (Live Audio Capture - ${dateKey})`;
+          youtubePending = true;
+
+          /* Async cleanup in database */
+          supabase
+            .from('digest_jobs')
+            .update({
+              video_id: '',
+              video_title: videoTitle,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', row.id)
+            .then(({ error: cleanErr }) => {
+              if (cleanErr) console.warn('[marketcall-history] Async clean error:', cleanErr.message);
+            });
+        }
+
         uniqueHistory.push({
           id: row.id,
           episodeDate: dateKey,
-          videoId: row.video_id || row.result?.videoId,
-          videoTitle: row.video_title || row.result?.videoTitle,
+          videoId,
+          videoTitle,
+          youtubePending,
           digest: row.result?.digest || null,
           generatedAt: row.result?.generatedAt || row.updated_at || row.created_at,
         });

@@ -232,7 +232,8 @@ export function parseDateFromTitle(title) {
 
 /**
  * Normalizes candidate video items and finds the best matching YouTube video for targetDateStr.
- * Strictly verifies the date to prevent matching yesterday's video or unrelated segments.
+ * Strictly verifies that the video title or description explicitly contains targetDateStr.
+ * Never matches prior-day videos or loose upload timestamps.
  */
 export function findMatchingYtVideo(candidateVideos, targetDateStr) {
   if (!Array.isArray(candidateVideos) || candidateVideos.length === 0 || !targetDateStr) return null;
@@ -241,35 +242,23 @@ export function findMatchingYtVideo(candidateVideos, targetDateStr) {
     if (!v || !v.videoId) return null;
     const title = v.videoTitle || v.title || '';
     const extractedDate = parseDateFromTitle(title);
-    const date = extractedDate || v.episodeDate || v.publishDate || (v.publishedAt ? v.publishedAt.split('T')[0] : '');
+    const descDate = parseDateFromTitle(v.description || '');
     return {
       videoId: v.videoId,
       videoTitle: title,
       title: title,
-      extractedDate,
-      episodeDate: date,
-      publishDate: date,
+      extractedDate: extractedDate || descDate,
       description: v.description || '',
-      isTodayMatch: Boolean(v.isTodayMatch) || (extractedDate && extractedDate === targetDateStr),
     };
   }).filter(Boolean);
 
   if (normalized.length === 0) return null;
 
-  /* 1. Strict exact match on extracted title date */
-  const titleDateMatch = normalized.find((v) => v.extractedDate && v.extractedDate === targetDateStr);
-  if (titleDateMatch) return titleDateMatch;
+  /* Strict match: Video title or description date MUST explicitly equal targetDateStr */
+  const exactMatch = normalized.find((v) => v.extractedDate && v.extractedDate === targetDateStr);
+  if (exactMatch) return exactMatch;
 
-  /* 2. Exact match on publishDate, but ONLY if title does not contradict with another date */
-  const publishDateMatch = normalized.find((v) => {
-    if (v.extractedDate && v.extractedDate !== targetDateStr) {
-      return false; // Title explicitly specifies a different date
-    }
-    return v.isTodayMatch || (v.episodeDate && v.episodeDate === targetDateStr);
-  });
-  if (publishDateMatch) return publishDateMatch;
-
-  /* Strict: Never fall back to yesterday's video or newest video */
+  /* Strict: Never fall back to yesterday's video, loose publish timestamps, or newest video */
   return null;
 }
 
@@ -949,12 +938,14 @@ export function resolveAnalystName(rawGuest, videoTitle = '', description = '', 
 
   /* Priority 3: YouTube video title extraction (STRICTLY ONLY IF video date matches targetDateStr) */
   if (videoTitle) {
-    let titleDateOk = true;
+    let titleDateOk = false;
     if (targetDateStr) {
       const vDate = parseDateFromTitle(videoTitle);
-      if (vDate && vDate !== targetDateStr) {
-        titleDateOk = false; // Video is explicitly from a different broadcast day
+      if (vDate && vDate === targetDateStr) {
+        titleDateOk = true;
       }
+    } else {
+      titleDateOk = Boolean(parseDateFromTitle(videoTitle));
     }
     if (titleDateOk) {
       const ytName = extractAnalystFromYouTubeTitle(videoTitle, description);
@@ -1225,15 +1216,23 @@ export function sanitizeDigestResult(digest, transcriptText = '') {
    Digest prompt construction
    ════════════════════════════════════════════════════════════════ */
 
-export function buildDigestPrompt(transcript, videoTitle = '', description = '') {
-  const officialGuest = extractAnalystFromYouTubeTitle(videoTitle, description);
+export function buildDigestPrompt(transcript, videoTitle = '', description = '', targetDateStr = '') {
+  let verifiedVideoTitle = videoTitle || '';
+  if (targetDateStr && verifiedVideoTitle) {
+    const vDate = parseDateFromTitle(verifiedVideoTitle);
+    if (vDate && vDate !== targetDateStr) {
+      verifiedVideoTitle = ''; // Reject title from a different date
+    }
+  }
+
+  const officialGuest = verifiedVideoTitle ? extractAnalystFromYouTubeTitle(verifiedVideoTitle, description) : null;
 
   const systemPrompt = `You are a CFA-level financial research assistant that summarizes BNN Bloomberg MarketCall episodes.
 Your job is to produce a structured, highly accurate digest from the provided episode transcript.
 
 STRICT ACCURACY & GROUNDING RULES:
 1. ONLY reference what the guest ACTUALLY SAID in the transcript. Do NOT add outside analysis, opinion, or unstated facts not present in the transcript. Do NOT add corporate structure, ownership, or subsidiary relationship details (e.g. parentheticals like "(Videotron/Cable subsidiary)") unless explicitly stated in the transcript.
-2. PRESERVE THE OFFICIAL GUEST NAME: ${officialGuest ? `The verified official guest name extracted from YouTube is "${officialGuest}". ALWAYS set "guest": "${officialGuest}".` : `Extract the guest's official real name from YouTube title/transcript accurately.`} Do NOT output phonetic Whisper mishearings (e.g. "Julian Nono-Wamden").
+2. ACCURATE GUEST NAME & FIRM: ${officialGuest ? `The verified official guest name for this episode is "${officialGuest}". ALWAYS set "guest": "${officialGuest}".` : `Extract the guest's real full name and firm accurately from the host's introduction in the broadcast transcript (e.g. "Thanks for joining us today here on Market Call... [Name] with us on the show. [Title/Firm]").`} Do NOT output phonetic Whisper mishearings (e.g. "Julian Nono-Wamden").
 3. ENTITY RESOLUTION & NO INVENTED TICKERS:
    - Silently resolve phonetic ASR errors to real company names & tickers (e.g. "Kojiko" → Cogeco Communications / CCA; "Quebecois" → Quebecor Inc / QBR.B; "Bird Construction" → BDT; "Element Fleet" → EFN).
    - Verify every ticker symbol. If you are not fully certain of a ticker, do not substitute a similar-sounding real ticker from a different company — leave the ticker field as an empty string instead (e.g. do not output CCI or CJR for Cogeco; do not output EFP for Element Fleet Management).
@@ -1289,7 +1288,8 @@ OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
   "closingNotes": "Optional 50-100 words. Any general macro risks or concluding thoughts the guest mentioned. Empty string if none."
 }`;
 
-  const userPrompt = `Here is the transcript from today's BNN Bloomberg MarketCall episode${videoTitle ? ` titled "${videoTitle}"` : ''}:
+  const titleContext = verifiedVideoTitle ? ` titled "${verifiedVideoTitle}"` : (targetDateStr ? ` (${targetDateStr})` : '');
+  const userPrompt = `Here is the transcript from today's BNN Bloomberg MarketCall episode${titleContext}:
 
 ---BEGIN TRANSCRIPT---
 ${transcript}
