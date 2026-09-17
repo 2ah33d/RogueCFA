@@ -25,6 +25,8 @@ import {
   getLatestMarketCallDateStr,
   findMatchingYtVideo,
   sanitizeAnalystName,
+  resolveAnalystName,
+  detectConsecutiveDayDouble,
   sanitizeDigestResult,
   pruneStaleJobs,
   fetchBnnTopPicksAnalyst,
@@ -182,36 +184,38 @@ export default async function handler(req, res) {
       }
     }
 
-    /* ── Priority 0: Check if a saved raw transcript exists in Supabase for this episode_date ── */
-    try {
-      const { data: savedJob } = await supabase
-        .from('digest_jobs')
-        .select('result, video_title')
-        .eq('episode_date', targetDateStr)
-        .not('result', 'is', null)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    /* ── Priority 0: Check if a saved raw transcript exists in Supabase for this episode_date (bypassed on force/renew) ── */
+    if (!force && !req.body?.bypassCache) {
+      try {
+        const { data: savedJob } = await supabase
+          .from('digest_jobs')
+          .select('result, video_title')
+          .eq('episode_date', targetDateStr)
+          .not('result', 'is', null)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      const existingRawText = savedJob?.result?.rawText || savedJob?.result?.raw_text || savedJob?.result?.text;
-      if (existingRawText && existingRawText.length >= 200) {
-        const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
-        const resolvedVideoId = matchingYtVid?.videoId || savedJob?.result?.videoId || '';
-        const resolvedVideoTitle = matchingYtVid?.videoTitle || savedJob?.video_title || savedJob?.result?.videoTitle || `BNN Bloomberg MarketCall (${targetDateStr})`;
-        const resolvedDescription = matchingYtVid?.description || savedJob?.result?.description || '';
+        const existingRawText = savedJob?.result?.rawText || savedJob?.result?.raw_text || savedJob?.result?.text;
+        if (existingRawText && existingRawText.length >= 200) {
+          const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
+          const resolvedVideoId = matchingYtVid?.videoId || savedJob?.result?.videoId || '';
+          const resolvedVideoTitle = matchingYtVid?.videoTitle || savedJob?.video_title || savedJob?.result?.videoTitle || `BNN Bloomberg MarketCall (${targetDateStr})`;
+          const resolvedDescription = matchingYtVid?.description || savedJob?.result?.description || '';
 
-        selectedVideo = {
-          videoId: resolvedVideoId,
-          videoTitle: resolvedVideoTitle,
-          description: resolvedDescription,
-          episodeDate: targetDateStr,
-          source: 'database_transcript_cache',
-        };
-        cleanedTranscript = cleanRawTranscript(existingRawText);
-        console.log(`[marketcall-process] Reusing pre-existing transcript from database for ${targetDateStr} (${cleanedTranscript.length} chars), videoId: ${resolvedVideoId}`);
+          selectedVideo = {
+            videoId: resolvedVideoId,
+            videoTitle: resolvedVideoTitle,
+            description: resolvedDescription,
+            episodeDate: targetDateStr,
+            source: 'database_transcript_cache',
+          };
+          cleanedTranscript = cleanRawTranscript(existingRawText);
+          console.log(`[marketcall-process] Reusing pre-existing transcript from database for ${targetDateStr} (${cleanedTranscript.length} chars), videoId: ${resolvedVideoId}`);
+        }
+      } catch (cacheLookErr) {
+        console.warn('[marketcall-process] Database transcript lookup failed:', cacheLookErr.message);
       }
-    } catch (cacheLookErr) {
-      console.warn('[marketcall-process] Database transcript lookup failed:', cacheLookErr.message);
     }
 
     /* ── Priority 1: Official BNN Market Call Podcast RSS Feed + Groq Whisper ── */
@@ -327,7 +331,38 @@ export default async function handler(req, res) {
       } catch (bnnErr) {
         console.warn('[marketcall-process] BNN Top Picks analyst lookup failed:', bnnErr.message);
       }
-      digest.guest = sanitizeAnalystName(digest.guest, selectedVideo.videoTitle, selectedVideo.description, bnnArticleGuest);
+
+      const resolved = resolveAnalystName(
+        digest.guest,
+        selectedVideo.videoTitle,
+        selectedVideo.description,
+        bnnArticleGuest,
+        targetDateStr
+      );
+      digest.guest = resolved.name;
+      digest.nameConfidence = resolved.confidence;
+      if (resolved.disclaimer) {
+        digest.nameDisclaimer = resolved.disclaimer;
+        if (!Array.isArray(digest._warnings)) digest._warnings = [];
+        if (!digest._warnings.includes(resolved.disclaimer)) {
+          digest._warnings.push(resolved.disclaimer);
+        }
+      }
+    }
+
+    /* Check for Consecutive Day Double-Mention Anomaly */
+    try {
+      const doubleCheck = await detectConsecutiveDayDouble(targetDateStr, digest, supabase);
+      if (doubleCheck && doubleCheck.isDouble) {
+        digest.isConsecutiveDouble = true;
+        digest.doubleAnomaly = doubleCheck;
+        if (!Array.isArray(digest._warnings)) digest._warnings = [];
+        if (!digest._warnings.includes(doubleCheck.warningMessage)) {
+          digest._warnings.push(doubleCheck.warningMessage);
+        }
+      }
+    } catch (doubleErr) {
+      console.warn('[marketcall-process] Consecutive double check error:', doubleErr.message);
     }
 
     /* Attach real token usage so frontend can show actual costs */

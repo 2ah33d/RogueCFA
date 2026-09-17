@@ -62,10 +62,8 @@ export async function discoverMarketCallVideos(todayStr, youtubeApiKey, timer) {
           return todayItems;
         }
 
-        if (items.length > 0) {
-          console.log(`[youtubeFetcher] YouTube API today video not found. Falling back to most recent: ${items[0].title} (${items[0].publishDate})`);
-          return [items[0]];
-        }
+        console.log(`[youtubeFetcher] YouTube API today video not found for ${todayStr}. Returning empty.`);
+        return [];
       }
     } catch (err) {
       console.warn('[youtubeFetcher] YouTube Data API search failed:', err.message);
@@ -138,11 +136,8 @@ export async function discoverMarketCallVideos(todayStr, youtubeApiKey, timer) {
       return todayResults;
     }
 
-    /* Fallback: Return most recent MarketCall video found on YouTube */
-    if (results.length > 0) {
-      console.log(`[youtubeFetcher] Today's video not published yet. Falling back to most recent MarketCall video: ${results[0].title} (${results[0].publishDate})`);
-      return [results[0]];
-    }
+    console.log(`[youtubeFetcher] Channel scrape: Today's video not published yet for ${todayStr}.`);
+    return [];
   } catch (err) {
     console.warn('[youtubeFetcher] YouTube channel page scrape failed:', err.message);
   }
@@ -400,10 +395,10 @@ export function extractDateFromTitle(title) {
   const monthMap = {
     january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
     july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
-    jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+    jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sept: '09', sep: '09', oct: '10', nov: '11', dec: '12',
   };
 
-  const match = title.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})/i);
+  const match = title.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})/i);
   if (match) {
     const mStr = match[1].toLowerCase();
     const month = monthMap[mStr] || '01';

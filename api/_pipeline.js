@@ -109,32 +109,15 @@ export async function findRecentMarketCallVideos(youtubeKey, timer) {
   timer?.start('YouTube video search');
   const candidateMap = new Map();
 
-  const isMarketCallVideo = (t, d) => {
-    const text = `${t || ''} ${d || ''}`.toLowerCase();
-    return text.includes('market call') ||
-           text.includes('marketcall') ||
-           text.includes('market outlook') ||
-           text.includes('market-outlook') ||
-           text.includes('top picks') ||
-           text.includes('past picks');
-  };
-
-  const parseDateFromTitle = (title) => {
-    if (!title) return null;
-    const monthMap = {
-      january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
-      july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
-      jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
-    };
-    const match = title.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})/i);
-    if (match) {
-      const mStr = match[1].toLowerCase();
-      const month = monthMap[mStr] || '01';
-      const day = match[2].padStart(2, '0');
-      const year = match[3];
-      return `${year}-${month}-${day}`;
-    }
-    return null;
+  const isMarketCallVideo = (t) => {
+    if (!t) return false;
+    const title = t.toLowerCase();
+    return title.includes('market call') ||
+           title.includes('marketcall') ||
+           title.includes('market outlook') ||
+           title.includes('market-outlook') ||
+           title.includes('top picks') ||
+           title.includes('past picks');
   };
 
   /* Strategy 1: Check BNN Bloomberg's Uploads playlist directly (UU... instead of UC...). */
@@ -153,7 +136,7 @@ export async function findRecentMarketCallVideos(youtubeKey, timer) {
       for (const item of items) {
         const rawTitle = decodeHTMLEntities(item.snippet?.title || '');
         const desc = decodeHTMLEntities(item.snippet?.description || '');
-        if (isMarketCallVideo(rawTitle, desc)) {
+        if (isMarketCallVideo(rawTitle)) {
           const videoId = item.snippet?.resourceId?.videoId;
           if (videoId && !candidateMap.has(videoId)) {
             const extractedDate = parseDateFromTitle(rawTitle);
@@ -203,8 +186,8 @@ export async function findRecentMarketCallVideos(youtubeKey, timer) {
         const rawTitle = decodeHTMLEntities(v.snippet?.title || '');
         const desc = decodeHTMLEntities(v.snippet?.description || '');
         const channel = (v.snippet?.channelTitle || '').toLowerCase();
-        const isBnnOrRelevant = channel.includes('bnn') || channel.includes('bloomberg') || isMarketCallVideo(rawTitle, desc);
-        if (isBnnOrRelevant && isMarketCallVideo(rawTitle, desc)) {
+        const isBnnOrRelevant = channel.includes('bnn') || channel.includes('bloomberg') || isMarketCallVideo(rawTitle);
+        if (isBnnOrRelevant && isMarketCallVideo(rawTitle)) {
           const videoId = v.id?.videoId;
           if (videoId && !candidateMap.has(videoId)) {
             const extractedDate = parseDateFromTitle(rawTitle);
@@ -227,28 +210,32 @@ export async function findRecentMarketCallVideos(youtubeKey, timer) {
 }
 
 /**
+ * Extract YYYY-MM-DD date string from video or article title (e.g., "Sept. 11, 2026" → "2026-09-11").
+ */
+export function parseDateFromTitle(title) {
+  if (!title) return null;
+  const monthMap = {
+    january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
+    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
+    jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sept: '09', sep: '09', oct: '10', nov: '11', dec: '12',
+  };
+  const match = title.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})/i);
+  if (match) {
+    const mStr = match[1].toLowerCase();
+    const month = monthMap[mStr] || '01';
+    const day = match[2].padStart(2, '0');
+    const year = match[3];
+    return `${year}-${month}-${day}`;
+  }
+  return null;
+}
+
+/**
  * Normalizes candidate video items and finds the best matching YouTube video for targetDateStr.
+ * Strictly verifies the date to prevent matching yesterday's video or unrelated segments.
  */
 export function findMatchingYtVideo(candidateVideos, targetDateStr) {
-  if (!Array.isArray(candidateVideos) || candidateVideos.length === 0) return null;
-
-  const parseDateFromTitle = (title) => {
-    if (!title) return null;
-    const monthMap = {
-      january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
-      july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
-      jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
-    };
-    const match = title.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})/i);
-    if (match) {
-      const mStr = match[1].toLowerCase();
-      const month = monthMap[mStr] || '01';
-      const day = match[2].padStart(2, '0');
-      const year = match[3];
-      return `${year}-${month}-${day}`;
-    }
-    return null;
-  };
+  if (!Array.isArray(candidateVideos) || candidateVideos.length === 0 || !targetDateStr) return null;
 
   const normalized = candidateVideos.map((v) => {
     if (!v || !v.videoId) return null;
@@ -259,6 +246,7 @@ export function findMatchingYtVideo(candidateVideos, targetDateStr) {
       videoId: v.videoId,
       videoTitle: title,
       title: title,
+      extractedDate,
       episodeDate: date,
       publishDate: date,
       description: v.description || '',
@@ -268,25 +256,21 @@ export function findMatchingYtVideo(candidateVideos, targetDateStr) {
 
   if (normalized.length === 0) return null;
 
-  /* 1. Exact match on date or isTodayMatch */
-  let match = normalized.find((v) => v.isTodayMatch || (v.episodeDate && v.episodeDate === targetDateStr));
-  if (match) return match;
+  /* 1. Strict exact match on extracted title date */
+  const titleDateMatch = normalized.find((v) => v.extractedDate && v.extractedDate === targetDateStr);
+  if (titleDateMatch) return titleDateMatch;
 
-  /* 2. Check if video published within 1.5 days of targetDateStr */
-  if (targetDateStr) {
-    const targetMs = new Date(targetDateStr).getTime();
-    if (!isNaN(targetMs)) {
-      match = normalized.find((v) => {
-        if (!v.episodeDate) return false;
-        const vMs = new Date(v.episodeDate).getTime();
-        return !isNaN(vMs) && Math.abs(vMs - targetMs) <= 86400000 * 1.5;
-      });
-      if (match) return match;
+  /* 2. Exact match on publishDate, but ONLY if title does not contradict with another date */
+  const publishDateMatch = normalized.find((v) => {
+    if (v.extractedDate && v.extractedDate !== targetDateStr) {
+      return false; // Title explicitly specifies a different date
     }
-  }
+    return v.isTodayMatch || (v.episodeDate && v.episodeDate === targetDateStr);
+  });
+  if (publishDateMatch) return publishDateMatch;
 
-  /* 3. Fallback to newest video */
-  return normalized[0] || null;
+  /* Strict: Never fall back to yesterday's video or newest video */
+  return null;
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -928,28 +912,136 @@ export async function fetchBnnTopPicksAnalyst(targetDate) {
   return null;
 }
 
-export function sanitizeAnalystName(rawGuest, videoTitle = '', description = '', bnnArticleGuest = '') {
-  if (!rawGuest) return 'BNN Bloomberg Guest';
-
-  /* Priority 1: BNN article-confirmed analyst name (scraped from Top Picks page) */
-  if (bnnArticleGuest && typeof bnnArticleGuest === 'string' && bnnArticleGuest.trim().length > 2) {
-    console.log(`[sanitizeAnalystName] Using BNN article-confirmed analyst: "${bnnArticleGuest.trim()}" (LLM said: "${rawGuest}")`);
-    return bnnArticleGuest.trim();
+/**
+ * Resolves the analyst name hierarchy:
+ * 1. Audio transcript extraction (primary ground truth)
+ * 2. Phonetic override dictionary
+ * 3. Authoritative BNN article if published for targetDateStr
+ * 4. Date-verified YouTube title if published for targetDateStr
+ * 5. Audio-only fallback with pronunciation disclaimer
+ */
+export function resolveAnalystName(rawGuest, videoTitle = '', description = '', bnnArticleGuest = '', targetDateStr = '') {
+  if (!rawGuest || typeof rawGuest !== 'string') {
+    return { name: 'BNN Bloomberg Guest', confidence: 'audio_only', disclaimer: null };
   }
 
-  /* Priority 2: Phonetic override dictionary */
-  const lower = rawGuest.trim().toLowerCase();
+  const cleanedRaw = rawGuest.trim();
+  const lower = cleanedRaw.toLowerCase();
+
+  /* Priority 1: Phonetic override dictionary */
   if (PHONETIC_ANALYST_OVERRIDES[lower]) {
-    return PHONETIC_ANALYST_OVERRIDES[lower];
+    return {
+      name: PHONETIC_ANALYST_OVERRIDES[lower],
+      confidence: 'phonetic_override',
+      disclaimer: null,
+    };
   }
 
-  /* Priority 3: YouTube video title extraction */
-  const ytName = extractAnalystFromYouTubeTitle(videoTitle, description);
-  if (ytName) {
-    return ytName;
+  /* Priority 2: BNN article-confirmed analyst name (scraped from Top Picks page) */
+  if (bnnArticleGuest && typeof bnnArticleGuest === 'string' && bnnArticleGuest.trim().length > 2) {
+    console.log(`[resolveAnalystName] Using BNN article-confirmed analyst: "${bnnArticleGuest.trim()}" (Audio/LLM said: "${rawGuest}")`);
+    return {
+      name: bnnArticleGuest.trim(),
+      confidence: 'official_article',
+      disclaimer: null,
+    };
   }
 
-  return rawGuest.trim();
+  /* Priority 3: YouTube video title extraction (STRICTLY ONLY IF video date matches targetDateStr) */
+  if (videoTitle) {
+    let titleDateOk = true;
+    if (targetDateStr) {
+      const vDate = parseDateFromTitle(videoTitle);
+      if (vDate && vDate !== targetDateStr) {
+        titleDateOk = false; // Video is explicitly from a different broadcast day
+      }
+    }
+    if (titleDateOk) {
+      const ytName = extractAnalystFromYouTubeTitle(videoTitle, description);
+      if (ytName) {
+        return {
+          name: ytName,
+          confidence: 'verified_youtube',
+          disclaimer: null,
+        };
+      }
+    }
+  }
+
+  /* Priority 4: Default to audio heard name + disclaimer */
+  return {
+    name: cleanedRaw,
+    confidence: 'audio_only',
+    disclaimer: 'Analyst name heard from live audio broadcast; spelling may vary pending official BNN publication.',
+  };
+}
+
+export function sanitizeAnalystName(rawGuest, videoTitle = '', description = '', bnnArticleGuest = '', targetDateStr = '') {
+  return resolveAnalystName(rawGuest, videoTitle, description, bnnArticleGuest, targetDateStr).name;
+}
+
+/**
+ * Consecutive Day Double-Mention Anomaly Detector.
+ * BNN Market Call does not host the same analyst two days in a row.
+ * Checks against the previous completed digest in Supabase.
+ */
+export async function detectConsecutiveDayDouble(targetDateStr, newDigest, supabase) {
+  if (!targetDateStr || !newDigest || !supabase) return null;
+
+  try {
+    const { data: prevRows, error } = await supabase
+      .from('digest_jobs')
+      .select('id, episode_date, result')
+      .lt('episode_date', targetDateStr)
+      .eq('status', 'complete')
+      .not('result', 'is', null)
+      .order('episode_date', { ascending: false })
+      .limit(1);
+
+    if (error || !prevRows || prevRows.length === 0) return null;
+
+    const prevEpisode = prevRows[0];
+    const prevDigest = prevEpisode.result?.digest;
+    if (!prevDigest) return null;
+
+    const prevGuest = (prevDigest.guest || '').trim().toLowerCase();
+    const currGuest = (newDigest.guest || '').trim().toLowerCase();
+
+    // Check if analyst name matches (excluding generic guest)
+    const guestMatches = Boolean(prevGuest && currGuest && prevGuest === currGuest && !prevGuest.includes('guest'));
+
+    // Check if picks overlap significantly (>50% identical tickers)
+    const prevPicks = (prevDigest.picks || []).map((p) => (p.ticker || p.company || '').toUpperCase().trim()).filter(Boolean);
+    const currPicks = (newDigest.picks || []).map((p) => (p.ticker || p.company || '').toUpperCase().trim()).filter(Boolean);
+
+    const commonPicks = currPicks.filter((p) => prevPicks.includes(p));
+    const pickOverlapRatio = currPicks.length > 0 ? commonPicks.length / currPicks.length : 0;
+    const picksMatch = currPicks.length >= 2 && pickOverlapRatio >= 0.5;
+
+    if (guestMatches || picksMatch) {
+      const reason = guestMatches && picksMatch
+        ? `identical analyst (${newDigest.guest}) and overlapping picks`
+        : guestMatches
+        ? `identical analyst (${newDigest.guest})`
+        : `overlapping picks (${commonPicks.join(', ')})`;
+
+      const warningMsg = `Potential duplicate episode anomaly: Matches ${reason} from ${prevEpisode.episode_date}. BNN Market Call does not host the same analyst two consecutive trading days.`;
+      console.warn(`[detectConsecutiveDayDouble] ${warningMsg}`);
+
+      return {
+        isDouble: true,
+        prevDate: prevEpisode.episode_date,
+        matchedGuest: guestMatches,
+        matchedPicks: picksMatch,
+        commonPicks,
+        warningMessage: warningMsg,
+      };
+    }
+  } catch (err) {
+    console.warn('[detectConsecutiveDayDouble] Check failed:', err.message);
+  }
+
+  return null;
 }
 
 /* ════════════════════════════════════════════════════════════════

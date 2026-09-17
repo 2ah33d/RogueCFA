@@ -75,6 +75,8 @@ export default function AnalystBubble({
   trackRecord: initialTrackRecord,
   onSelectGuest,
   className = '',
+  nameConfidence = null,
+  nameDisclaimer = null,
 }) {
   // Synchronous 0ms cache check on initial render
   const cached = getCachedAnalystRecord(guestName) || initialTrackRecord;
@@ -139,9 +141,22 @@ export default function AnalystBubble({
         {/* Top Header: Identity & Credibility Score Ring */}
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0 text-left">
-            <h3 className="text-base font-bold text-prime group-hover:text-white transition-colors leading-snug">
-              {guestName}
-            </h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base font-bold text-prime group-hover:text-white transition-colors leading-snug">
+                {guestName}
+              </h3>
+              {nameConfidence === 'audio_only' && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/25"
+                  title={nameDisclaimer || 'Name heard from live broadcast audio; spelling may vary pending official BNN publication.'}
+                >
+                  <svg className="w-2.5 h-2.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 100-6 3 3 0 000 6z" />
+                  </svg>
+                  <span>Audio Identified</span>
+                </span>
+              )}
+            </div>
             <p className="text-xs text-dim leading-relaxed mt-0.5 text-left">
               {firm || record?.firm || 'BNN MarketCall Guest'}
             </p>

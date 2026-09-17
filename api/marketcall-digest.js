@@ -164,7 +164,7 @@ export default async function handler(req, res) {
                 cached.result.videoId = matchingYtVid.videoId;
                 cached.result.videoTitle = matchingYtVid.videoTitle || cached.result.videoTitle;
                 if (cached.result.digest && cached.result.digest.guest) {
-                  cached.result.digest.guest = sanitizeAnalystName(cached.result.digest.guest, matchingYtVid.videoTitle, matchingYtVid.description);
+                  cached.result.digest.guest = sanitizeAnalystName(cached.result.digest.guest, matchingYtVid.videoTitle, matchingYtVid.description, '', targetDateStr);
                 }
                 /* Persist updated result & video_id to Supabase */
                 supabase

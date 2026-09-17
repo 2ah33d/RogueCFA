@@ -182,4 +182,113 @@ test('7-calendar-day rolling retention preserves 5 weekday broadcast episodes ac
   assert.ok(oldFileDate < cutoffDate, `${oldEp} should be marked for pruning`);
 });
 
+test('findMatchingYtVideo returns null when target date has no matching video (no yesterday fallback)', async () => {
+  const { findMatchingYtVideo } = await import('../api/_pipeline.js');
+  const candidates = [
+    { videoId: 'qoFxiVFlMps', videoTitle: "Market Call: Greg Newman's outlook on North American Stocks (Sept. 11, 2026)", publishDate: '2026-09-11' },
+    { videoId: '8bQ6Fj9Wo0c', videoTitle: "Market Call: Greg Newman's outlook on North American Stocks (Sept. 11, 2026)", publishDate: '2026-09-11' },
+  ];
+  // Candidate is from Sept 11, but target date is Sept 10
+  const match = findMatchingYtVideo(candidates, '2026-09-10');
+  assert.equal(match, null, 'Must return null and never match yesterday or adjacent day');
+});
+
+test('resolveAnalystName respects audio-heard name, BNN article validation, and sets disclaimer for audio-only', async () => {
+  const { resolveAnalystName } = await import('../api/_pipeline.js');
+
+  // Case 1: Audio heard name with no external confirmation
+  const audioOnly = resolveAnalystName('Stan Wong', '', '', '', '2026-09-10');
+  assert.equal(audioOnly.name, 'Stan Wong');
+  assert.equal(audioOnly.confidence, 'audio_only');
+  assert.ok(audioOnly.disclaimer.includes('Analyst name heard from live audio broadcast'));
+
+  // Case 2: Mismatched video from a different day MUST NOT override audio name
+  const mismatchedYt = resolveAnalystName(
+    'Stan Wong',
+    "Market Call: Greg Newman's outlook on North American Stocks (Sept. 11, 2026)",
+    '',
+    '',
+    '2026-09-10' // target date is Sept 10, video is Sept 11
+  );
+  assert.equal(mismatchedYt.name, 'Stan Wong', 'Must keep Stan Wong and reject Greg Newman from Sept 11 video');
+  assert.equal(mismatchedYt.confidence, 'audio_only');
+
+  // Case 3: Exact date-verified YouTube title
+  const dateVerifiedYt = resolveAnalystName(
+    'Stan Wong',
+    "Market Call: Stan Wong's outlook on North American Large Caps (Sept. 10, 2026)",
+    '',
+    '',
+    '2026-09-10'
+  );
+  assert.equal(dateVerifiedYt.name, 'Stan Wong');
+  assert.equal(dateVerifiedYt.confidence, 'verified_youtube');
+
+  // Case 4: Authoritative BNN article
+  const bnnArticle = resolveAnalystName('Stan Wong', '', '', 'Stan Wong', '2026-09-10');
+  assert.equal(bnnArticle.name, 'Stan Wong');
+  assert.equal(bnnArticle.confidence, 'official_article');
+});
+
+test('detectConsecutiveDayDouble flags double guest and overlapping picks', async () => {
+  const { detectConsecutiveDayDouble } = await import('../api/_pipeline.js');
+
+  const mockSupabase = {
+    from: () => ({
+      select: () => ({
+        lt: () => ({
+          eq: () => ({
+            not: () => ({
+              order: () => ({
+                limit: () => Promise.resolve({
+                  data: [
+                    {
+                      id: 'live-2026-09-10',
+                      episode_date: '2026-09-10',
+                      result: {
+                        digest: {
+                          guest: 'Greg Newman',
+                          picks: [{ ticker: 'NVDA' }, { ticker: 'AAPL' }, { ticker: 'MSFT' }],
+                        },
+                      },
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  };
+
+  // Same guest as previous day
+  const resultDouble = await detectConsecutiveDayDouble(
+    '2026-09-11',
+    {
+      guest: 'Greg Newman',
+      picks: [{ ticker: 'NVDA' }, { ticker: 'CP' }, { ticker: 'GOOGL' }],
+    },
+    mockSupabase
+  );
+
+  assert.ok(resultDouble, 'Should detect consecutive double');
+  assert.equal(resultDouble.isDouble, true);
+  assert.equal(resultDouble.matchedGuest, true);
+  assert.ok(resultDouble.warningMessage.includes('identical analyst (Greg Newman)'));
+
+  // Different guest and different picks
+  const resultClean = await detectConsecutiveDayDouble(
+    '2026-09-11',
+    {
+      guest: 'Ivana Delevska',
+      picks: [{ ticker: 'AMD' }, { ticker: 'TSM' }, { ticker: 'ARM' }],
+    },
+    mockSupabase
+  );
+
+  assert.equal(resultClean, null, 'Clean episode must not be flagged');
+});
+
 

@@ -454,13 +454,15 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     /* Manual trigger only via buttons */
   }, [digest, hasAttempted, loading, fetchDigest]);
 
-  /** Trigger immediate fetch/check for newer episode */
-  const handleCheckNewer = useCallback(() => {
+  /** Trigger immediate fetch/check for newer episode or refresh current episode */
+  const handleCheckNewer = useCallback((forcedDate = null) => {
     stopPolling();
     setError(null);
     setDigest(null);
-    fetchDigest(true);
-  }, [fetchDigest]);
+    const activeDate = forcedDate || videoInfo?.episodeDate || selectedDate;
+    const target = (activeDate && activeDate !== todayStr) ? activeDate : null;
+    fetchDigest(true, target);
+  }, [fetchDigest, videoInfo?.episodeDate, selectedDate, todayStr]);
 
   /* Try to get track record for the guest */
   const trackRecord = digest?.guest ? getGuestTrackRecord(digest.guest) : null;
@@ -975,9 +977,11 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
             {/* Merged BNN Bloomberg Source & Check Newer Action Button */}
             <button
               type="button"
-              onClick={handleCheckNewer}
+              onClick={() => handleCheckNewer()}
               className="h-8 px-3.5 inline-flex items-center gap-2 bg-surface-card hover:bg-surface-elevated rounded-full text-xs font-medium text-prime shadow-antigravity transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer shrink-0"
-              title="Check YouTube & Supabase for a newer BNN Bloomberg MarketCall episode"
+              title={(videoInfo?.episodeDate && videoInfo.episodeDate !== todayStr)
+                ? `Re-check and refresh data for episode ${videoInfo.episodeDate}`
+                : "Check YouTube & Supabase for a newer BNN Bloomberg MarketCall episode"}
             >
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
               <span className="text-dim font-medium">
@@ -987,7 +991,9 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
               <svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              <span className="font-semibold text-prime">Check Newer</span>
+              <span className="font-semibold text-prime">
+                {(videoInfo?.episodeDate && videoInfo.episodeDate !== todayStr) ? 'Refresh Episode' : 'Check Newer'}
+              </span>
             </button>
 
             {/* Renew / Re-generate Digest Button */}
@@ -1108,6 +1114,37 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
             <span>Generate {newerAudioDate}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Consecutive Double Episode Anomaly Banner */}
+      {(digest?.isConsecutiveDouble || digest?._warnings?.some((w) => w && w.toLowerCase().includes('duplicate episode'))) && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-antigravity animate-fade-in text-amber-200">
+          <div className="flex items-start gap-3">
+            <svg className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="space-y-0.5">
+              <div className="text-xs font-bold text-amber-300 flex items-center gap-2">
+                <span>Potential Duplicate Episode Anomaly</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold">Double Detected</span>
+              </div>
+              <p className="text-[11px] text-amber-200/90 font-normal">
+                {digest?.doubleAnomaly?.warningMessage || 'This episode shares the same analyst or top picks as the preceding trading day. BNN does not feature the same guest two days consecutively.'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleRenewDigest}
+            className="px-3.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 border border-amber-500/30 flex items-center gap-1.5"
+            title="Force re-fetch clean broadcast audio from RSS"
+          >
+            <svg className="w-3.5 h-3.5 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>Re-sync from RSS</span>
           </button>
         </div>
       )}
@@ -1236,6 +1273,8 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
             date={videoInfo?.episodeDate || todayStr}
             trackRecord={trackRecord}
             onSelectGuest={onSelectGuest}
+            nameConfidence={digest.nameConfidence}
+            nameDisclaimer={digest.nameDisclaimer}
           />
 
           {/* Episode Info & Actionable Digest Stats Card — Soft elevation shadow, clean sans-serif typography */}
