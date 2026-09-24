@@ -1,15 +1,6 @@
 {
   "framework": "vite",
   "functions": {
-    "api/score.js": {
-      "maxDuration": 60
-    },
-    "api/finnhub.js": {
-      "maxDuration": 30
-    },
-    "api/alphavantage.js": {
-      "maxDuration": 30
-    },
     "api/marketcall-digest.js": {
       "maxDuration": 60
     },
