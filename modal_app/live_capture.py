@@ -14,6 +14,28 @@ app_image = (
 
 app = modal.App("roguecfa-live-capture")
 
+PRIMARY_STREAM_URL = os.environ.get("BNN_LIVE_STREAM_URL") or "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNN_ADP.m3u8"
+FALLBACK_STREAM_URLS = [
+    "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNN_ADP.aac",
+    "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNNAAC.m3u8",
+    "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNNAAC.aac",
+]
+
+def resolve_and_verify_stream(url: str) -> str:
+    """Follow HTTP 302 redirects to find the active live edge server node (e.g. 18153, 29313)."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Referer": "https://www.bnnbloomberg.ca/"
+        }
+        res = requests.get(url, headers=headers, allow_redirects=True, timeout=12)
+        if res.status_code == 200 and res.url:
+            print(f"Resolved live stream: {url} -> {res.url} (Status: {res.status_code})")
+            return res.url
+    except Exception as err:
+        print(f"Warning: Stream resolution failed for {url}: {err}")
+    return url
+
 @app.function(
     image=app_image,
     # Runs Mon-Fri at 11:59 AM EST / 8:59 AM PST (captures 12:00 PM - 1:00 PM EST live broadcast)
@@ -23,8 +45,8 @@ app = modal.App("roguecfa-live-capture")
     nonpreemptible=True,  # Dedicated instance prevents cloud eviction mid-broadcast
     retries=0,            # Never blindly retry/restart live capture after broadcast ends
 )
-def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rss: bool = True):
-    stream_url = os.environ.get("BNN_LIVE_STREAM_URL") or "https://27153.live.streamtheworld.com/TV_BNN_ADP/HLS/playlist.m3u8"
+def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rss: bool = True, is_test: bool = False):
+    stream_url = PRIMARY_STREAM_URL
     webhook_url = os.environ.get("VERCEL_WEBHOOK_URL", "https://roguecfa.vercel.app/api/ingest")
     supabase_url = os.environ.get("SUPABASE_URL", "")
     supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY", "")
@@ -62,7 +84,7 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
     # Broadcast Ceiling Guard: Market Call strictly airs 12:00 PM - 1:00 PM Eastern Time.
     # We allow a 1-minute buffer (13:01:00 ET). Any live stream capture MUST strictly end by 1:01 PM ET.
     capture_duration = duration_secs
-    if now_et is not None:
+    if not is_test and now_et is not None:
         target_end_et = now_et.replace(hour=13, minute=1, second=0, microsecond=0)
         seconds_until_end = int((target_end_et - now_et).total_seconds())
 
@@ -82,11 +104,13 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
         capture_duration = min(duration_secs, seconds_until_end)
         print(f"Wall-clock guard: Current ET is {now_et.strftime('%H:%M:%S')}. "
               f"Clamping capture duration to {capture_duration}s (ends at {target_end_et.strftime('%H:%M:%S')} ET).")
+    elif is_test:
+        print(f"Test mode active: Capturing exactly {capture_duration}s (wall-clock ceiling bypassed).")
 
-    raw_filename = "raw_marketcall.m4a"
-    compressed_filename = f"marketcall-{today_str}.m4a"
+    raw_filename = f"test_raw_{today_str}.m4a" if is_test else "raw_marketcall.m4a"
+    compressed_filename = f"test-marketcall-{today_str}.m4a" if is_test else f"marketcall-{today_str}.m4a"
 
-    print(f"=== Beginning Modal CPU Live Capture for date: {today_str} (skip_rss={skip_rss}) ===")
+    print(f"=== Beginning Modal CPU Live Capture for date: {today_str} (skip_rss={skip_rss}, is_test={is_test}) ===")
 
     capture_success = False
 
@@ -152,72 +176,89 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
     SAFETY_MARGIN = 180   # Reserve 3 min for compression + upload
 
     if not capture_success:
-        target_stream_url = stream_url
-        if stream_url.endswith(".m3u8") and not stream_url.startswith("hls://"):
-            target_stream_url = f"hls://{stream_url}"
+        candidate_urls = [PRIMARY_STREAM_URL] + [u for u in FALLBACK_STREAM_URLS if u != PRIMARY_STREAM_URL]
+        min_bytes_expected = 50_000 if is_test else 1_000_000
 
-        print(f"Attempting live stream capture via Streamlink ({target_stream_url}) for {capture_duration}s...")
-        streamlink_cmd = [
-            "streamlink",
-            "--http-header", "Referer=https://www.bnnbloomberg.ca/",
-            "--http-header", "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            target_stream_url,
-            "best",
-            "-o", raw_filename
-        ]
-        try:
-            subprocess.run(streamlink_cmd, timeout=capture_duration + 15, check=True)
-            capture_success = True
-        except subprocess.TimeoutExpired:
-            # TimeoutExpired after capture_duration means Streamlink recorded for the
-            # full intended duration — the output file should already be on disk.
-            if os.path.isfile(raw_filename) and os.path.getsize(raw_filename) > 1_000_000:
-                file_mb = os.path.getsize(raw_filename) / (1024 * 1024)
-                print(f"Streamlink timed out as expected after {capture_duration}s. "
-                      f"Output file exists ({file_mb:.1f} MB) — treating as successful capture.")
-                capture_success = True
-            else:
-                print("Streamlink timed out but output file is missing or too small. "
-                      "Falling back to FFmpeg...")
-        except Exception as streamlink_err:
-            print(f"Streamlink capture failed ({streamlink_err}). Attempting direct FFmpeg capture fallback...")
+        for candidate_url in candidate_urls:
+            if capture_success:
+                break
 
-        # FFmpeg fallback: only attempt if Streamlink didn't produce a usable file
-        if not capture_success:
-            # Re-evaluate wall-clock ceiling so FFmpeg never bleeds into Trading Day
-            seconds_left_in_broadcast = 3600
-            if eastern_tz is not None:
-                now_fallback_et = datetime.datetime.now(eastern_tz)
-                target_end_fallback_et = now_fallback_et.replace(hour=13, minute=1, second=0, microsecond=0)
-                seconds_left_in_broadcast = int((target_end_fallback_et - now_fallback_et).total_seconds())
-                if seconds_left_in_broadcast < 180:
-                    raise RuntimeError(
-                        f"Market Call broadcast has concluded (current time: {now_fallback_et.strftime('%H:%M:%S')} ET). "
-                        f"Aborting FFmpeg fallback to prevent capturing subsequent programming."
-                    )
+            resolved_url = resolve_and_verify_stream(candidate_url)
+            print(f"Attempting capture with stream candidate: {candidate_url} (resolved to {resolved_url})")
 
-            elapsed = _time.monotonic() - _capture_start
-            remaining = MODAL_TIMEOUT - elapsed - SAFETY_MARGIN
-            if remaining < 120:
-                raise RuntimeError(
-                    f"Not enough time remaining for FFmpeg fallback "
-                    f"({remaining:.0f}s left, need at least 120s). "
-                    f"Streamlink consumed {elapsed:.0f}s.")
-            ffmpeg_duration = min(int(remaining), capture_duration, seconds_left_in_broadcast)
-            print(f"Attempting direct FFmpeg capture fallback "
-                  f"({ffmpeg_duration}s budget, {remaining:.0f}s before Modal timeout, {seconds_left_in_broadcast}s before broadcast end)...")
-            try:
-                ffmpeg_cmd = [
-                    "ffmpeg", "-y",
-                    "-headers", "Referer: https://www.bnnbloomberg.ca/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\r\n",
-                    "-i", stream_url,
-                    "-t", str(ffmpeg_duration),
-                    "-vn", "-c:a", "aac", raw_filename
+            # 2a: Try Streamlink if candidate resolves to HLS (.m3u8)
+            if ".m3u8" in resolved_url:
+                target_stream_url = resolved_url
+                if not target_stream_url.startswith("hls://"):
+                    target_stream_url = f"hls://{target_stream_url}"
+
+                print(f"Attempting live stream capture via Streamlink ({target_stream_url}) for {capture_duration}s...")
+                streamlink_cmd = [
+                    "streamlink",
+                    "--http-header", "Referer=https://www.bnnbloomberg.ca/",
+                    "--http-header", "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    target_stream_url,
+                    "best",
+                    "-o", raw_filename
                 ]
-                subprocess.run(ffmpeg_cmd, timeout=ffmpeg_duration + 30, check=True)
-                capture_success = True
-            except Exception as ffmpeg_err:
-                raise RuntimeError(f"Both Streamlink and direct FFmpeg live capture failed: {ffmpeg_err}")
+                try:
+                    subprocess.run(streamlink_cmd, timeout=capture_duration + 15, check=True)
+                    if os.path.isfile(raw_filename) and os.path.getsize(raw_filename) > min_bytes_expected:
+                        file_mb = os.path.getsize(raw_filename) / (1024 * 1024)
+                        print(f"Streamlink capture succeeded ({file_mb:.1f} MB).")
+                        capture_success = True
+                except subprocess.TimeoutExpired:
+                    if os.path.isfile(raw_filename) and os.path.getsize(raw_filename) > min_bytes_expected:
+                        file_mb = os.path.getsize(raw_filename) / (1024 * 1024)
+                        print(f"Streamlink timed out as expected after {capture_duration}s. "
+                              f"Output file exists ({file_mb:.1f} MB) — treating as successful capture.")
+                        capture_success = True
+                    else:
+                        print("Streamlink timed out but output file is missing or too small. "
+                              "Falling back to FFmpeg...")
+                except Exception as streamlink_err:
+                    print(f"Streamlink capture failed ({streamlink_err}). Attempting direct FFmpeg capture fallback...")
+
+            # 2b: Direct FFmpeg capture fallback (works for both HLS .m3u8 and raw continuous .aac streams)
+            if not capture_success:
+                seconds_left_in_broadcast = 3600
+                if not is_test and eastern_tz is not None:
+                    now_fallback_et = datetime.datetime.now(eastern_tz)
+                    target_end_fallback_et = now_fallback_et.replace(hour=13, minute=1, second=0, microsecond=0)
+                    seconds_left_in_broadcast = int((target_end_fallback_et - now_fallback_et).total_seconds())
+                    if seconds_left_in_broadcast < 180:
+                        raise RuntimeError(
+                            f"Market Call broadcast has concluded (current time: {now_fallback_et.strftime('%H:%M:%S')} ET). "
+                            f"Aborting FFmpeg fallback to prevent capturing subsequent programming."
+                        )
+
+                elapsed = _time.monotonic() - _capture_start
+                remaining = MODAL_TIMEOUT - elapsed - SAFETY_MARGIN
+                if remaining < 60:
+                    raise RuntimeError(
+                        f"Not enough time remaining for FFmpeg fallback "
+                        f"({remaining:.0f}s left). Streamlink consumed {elapsed:.0f}s."
+                    )
+                ffmpeg_duration = min(int(remaining), capture_duration, seconds_left_in_broadcast)
+                print(f"Attempting direct FFmpeg capture ({ffmpeg_duration}s budget, target={resolved_url})...")
+                try:
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-y",
+                        "-headers", "Referer: https://www.bnnbloomberg.ca/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\r\n",
+                        "-i", resolved_url,
+                        "-t", str(ffmpeg_duration),
+                        "-vn", "-c:a", "aac", raw_filename
+                    ]
+                    subprocess.run(ffmpeg_cmd, timeout=ffmpeg_duration + 30, check=True)
+                    if os.path.isfile(raw_filename) and os.path.getsize(raw_filename) > min_bytes_expected:
+                        file_mb = os.path.getsize(raw_filename) / (1024 * 1024)
+                        print(f"FFmpeg capture succeeded ({file_mb:.1f} MB).")
+                        capture_success = True
+                except Exception as ffmpeg_err:
+                    print(f"FFmpeg capture attempt failed for {resolved_url}: {ffmpeg_err}")
+
+        if not capture_success:
+            raise RuntimeError("All Streamlink and direct FFmpeg live capture candidates failed.")
 
     # Step 2: Compress audio with FFmpeg to 48kbps mono AAC (~21.6 MB for 1 hour)
     print("Compressing captured audio to 48kbps mono AAC (~21 MB target size)...")
@@ -300,6 +341,19 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
         print(f"Warning: Audio pruning failed (non-critical): {prune_err}")
 
     # Step 5: Webhook notification to Vercel endpoint
+    if is_test:
+        print("=== TEST MODE COMPLETE ===")
+        print("Bypassing Vercel webhook so test audio is NOT ingested into production.")
+        print(f"Public audio URL: {public_audio_url}")
+        return {
+            "status": "success",
+            "is_test": True,
+            "filename": compressed_filename,
+            "duration_secs": capture_duration,
+            "file_size_mb": round(file_size_mb, 2),
+            "public_audio_url": public_audio_url
+        }
+
     print("POSTing audio capture notification to Vercel API...")
     max_retries = 3
     for attempt in range(1, max_retries + 1):
@@ -443,4 +497,18 @@ def check_and_purge_rss():
             # Retain audio up to the rolling 7-day window so users can generate day-accurate digests
             # for up to 5 days if they check in late during the week.
             print(f"Retaining live audio '{name}' in Supabase Storage (managed by 7-day rolling pruning window).")
+
+
+@app.local_entrypoint()
+def main(duration: int = 600, test: bool = True):
+    print(f"Triggering live capture test on Modal (duration={duration}s, is_test={test})...")
+    res = run_live_capture.remote(duration_secs=duration, is_test=test)
+    print("\n================ CAPTURE RESULT ================")
+    print(f"Status: {res.get('status')}")
+    print(f"Filename: {res.get('filename')}")
+    print(f"Duration: {res.get('duration_secs')}s")
+    print(f"File Size: {res.get('file_size_mb')} MB")
+    print(f"Audio URL: {res.get('public_audio_url')}")
+    print("================================================\n")
+
 
