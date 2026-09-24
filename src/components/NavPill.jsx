@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 
 const TABS = [
   { key: 'landing', label: 'Overview' },
-  { key: 'score', label: 'Score Ticker' },
+  { key: 'search', label: 'Ticker Search', alias: 'score' },
   { key: 'digest', label: 'Latest Picks' },
   { key: 'history', label: 'Score History' },
 ];
@@ -17,7 +17,7 @@ export default function NavPill({ activeTab, onTabChange }) {
   return (
     <nav className="relative flex items-center gap-1 bg-surface-card p-1 rounded-full shadow-inner text-xs overflow-hidden">
       {TABS.map((tab) => {
-        const isActive = activeTab === tab.key;
+        const isActive = activeTab === tab.key || (tab.alias && activeTab === tab.alias);
         return (
           <button
             key={tab.key}

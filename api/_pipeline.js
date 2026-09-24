@@ -1579,12 +1579,13 @@ export function extractJSON(text) {
 /**
  * Non-blocking cleanup of stale digest jobs older than N days (default 14 days).
  */
-export async function pruneStaleJobs(supabase, days = 14) {
+export async function pruneStaleJobs(supabase, days = 90) {
   try {
     const cutoffDate = new Date(Date.now() - days * 86400 * 1000).toISOString().split('T')[0];
     await supabase
       .from('digest_jobs')
       .delete()
+      .neq('status', 'complete')
       .lt('episode_date', cutoffDate);
   } catch (err) {
     console.warn('[pipeline] Prune stale jobs error:', err.message);

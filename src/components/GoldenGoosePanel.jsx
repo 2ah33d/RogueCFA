@@ -114,7 +114,7 @@ function AnalystMentionPill({ mention, onSelectGuest }) {
  * @param {Array<Object>} props.episodes - List of MarketCall episodes
  * @param {Function} props.onSelectGuest - (guestName) => void — open guest profile
  */
-export default function GoldenGoosePanel({ episodes = [], onSelectGuest }) {
+export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefreshEpisodes }) {
   const [showAllShortlists, setShowAllShortlists] = useState(false);
   const [llmResult, setLlmResult] = useState(null);
   const [loadingLLM, setLoadingLLM] = useState(false);
@@ -162,6 +162,9 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest }) {
   /* Explicit Trigger: Generate / Refresh LLM Eyes on demand */
   const handleGenerateLLMEyes = useCallback(async (force = true) => {
     setLoadingLLM(true);
+    if (onRefreshEpisodes) {
+      onRefreshEpisodes();
+    }
     const { llmKey } = getKeys();
     const provider = getProvider();
 
@@ -240,11 +243,23 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest }) {
     }));
   }
 
-  const rejectedTickers = llmResult?._rejectedTickers || [];
-
-  /* Create quick lookup map for candidate details */
-  const candidateMap = new Map();
-  [...buyHoldCandidates, ...sellCandidates].forEach((c) => candidateMap.set(c.ticker, c));
+  /* Create quick lookup map for candidate details, merging API shortlists with local candidates */
+  const candidateMap = useMemo(() => {
+    const map = new Map();
+    const all = [
+      ...(llmResult?.shortlists?.buyHoldCandidates || []),
+      ...(llmResult?.shortlists?.sellCandidates || []),
+      ...buyHoldCandidates,
+      ...sellCandidates,
+    ];
+    all.forEach((cand) => {
+      const existing = map.get(cand.ticker);
+      if (!existing || (cand.mentions && cand.mentions.length > (existing.mentions?.length || 0))) {
+        map.set(cand.ticker, cand);
+      }
+    });
+    return map;
+  }, [llmResult, buyHoldCandidates, sellCandidates]);
 
   return (
     <div className="w-full max-w-4xl mx-auto my-8 space-y-6 font-sans">

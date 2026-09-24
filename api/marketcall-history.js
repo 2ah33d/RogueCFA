@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
+  res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate=60');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') {
@@ -17,15 +17,16 @@ export default async function handler(req, res) {
     const limit = Math.min(parseInt(req.query.limit || '30', 10), 100);
     const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
 
-    /* ── Automated 30-Day Retention Pruning: Delete summaries older than 30 days ── */
+    /* ── Automated Retention Pruning: Only clean up failed/incomplete jobs older than 90 days ── */
     try {
-      const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const cutoffDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       supabase
         .from('digest_jobs')
         .delete()
+        .neq('status', 'complete')
         .lt('episode_date', cutoffDate)
         .then(({ error: pruneErr }) => {
-          if (pruneErr) console.warn('[marketcall-history] 30-day retention cleanup error:', pruneErr.message);
+          if (pruneErr) console.warn('[marketcall-history] Retention cleanup error:', pruneErr.message);
         });
     } catch {
       /* ignore */
@@ -145,6 +146,7 @@ export default async function handler(req, res) {
           videoTitle,
           youtubePending,
           digest: row.result?.digest || null,
+          goldenGoose: row.result?.goldenGoose || null,
           generatedAt: row.result?.generatedAt || row.updated_at || row.created_at,
         });
       }

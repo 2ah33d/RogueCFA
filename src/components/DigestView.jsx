@@ -118,6 +118,43 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
   const [copied, setCopied] = useState(false);
   const [isCheckingVideo, setIsCheckingVideo] = useState(false);
 
+  /* Re-fetch latest history from DB with cache-buster */
+  const handleRefreshHistory = useCallback(() => {
+    fetch(`/api/marketcall-history?limit=30&t=${Date.now()}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.history)) {
+          setHistoryEpisodes(data.history);
+          if (Array.isArray(data.availableAudioDates)) {
+            setAvailableAudioDates(data.availableAudioDates);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  /* Always keep effectiveEpisodes updated with currently active digest */
+  const effectiveEpisodes = useMemo(() => {
+    const list = [...historyEpisodes];
+    const activeDate = videoInfo?.episodeDate || selectedDate || todayStr;
+    if (digest && activeDate) {
+      const existingIdx = list.findIndex((ep) => (ep.episodeDate || ep.date) === activeDate);
+      const activeEp = {
+        episodeDate: activeDate,
+        videoId: videoInfo?.videoId || '',
+        videoTitle: videoInfo?.videoTitle || `BNN Bloomberg MarketCall (${activeDate})`,
+        digest,
+        result: { digest },
+      };
+      if (existingIdx >= 0) {
+        list[existingIdx] = { ...list[existingIdx], ...activeEp };
+      } else {
+        list.unshift(activeEp);
+      }
+    }
+    return list;
+  }, [historyEpisodes, digest, videoInfo, selectedDate, todayStr]);
+
   /* Helper to format full digest into clean markdown text with stance flags */
   const handleCopyAllText = () => {
     if (!digest) return;
@@ -145,7 +182,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     }
 
     /* Cross-check local storage cache against Supabase DB */
-    fetch('/api/marketcall-history?limit=10')
+    fetch(`/api/marketcall-history?limit=30&t=${Date.now()}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && Array.isArray(data.history)) {
@@ -372,7 +409,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     const { llmKey } = getKeys();
     const provider = getProvider();
 
-    fetch('/api/marketcall-history?limit=10')
+    fetch(`/api/marketcall-history?limit=30&t=${Date.now()}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((histData) => {
         if (histData && Array.isArray(histData.history)) {
@@ -1206,9 +1243,10 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
 
       {/* Golden Goose & Multi-Analyst Convergence Panel */}
       <GoldenGoosePanel
-        episodes={historyEpisodes.length > 0 ? historyEpisodes : (digest ? [{ episodeDate: videoInfo?.episodeDate || selectedDate, digest }] : [])}
+        episodes={effectiveEpisodes}
         onScoreTicker={onScoreTicker}
         onSelectGuest={onSelectGuest}
+        onRefreshEpisodes={handleRefreshHistory}
       />
 
       {/* 2-Column Dashboard Grid */}

@@ -177,6 +177,7 @@ export default async function handler(req, res) {
           ...(latestJob.result || {}),
           goldenGoose: {
             ...validated,
+            shortlists,
             evaluatedAt: new Date().toISOString(),
           },
         };

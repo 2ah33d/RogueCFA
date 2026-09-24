@@ -20,10 +20,11 @@ import HistoryTab from './components/HistoryTab';
 import ComparisonMatrix from './components/ComparisonMatrix';
 import MarketCallBar from './components/MarketCallBar';
 import GuestModal from './components/GuestModal';
+import TickerSearch from './components/TickerSearch';
 import DigestView from './components/DigestView';
 import LandingPage from './components/LandingPage';
 import NavPill from './components/NavPill';
-import { Menu, X, LayoutDashboard, Target, Sparkles, History } from 'lucide-react';
+import { Menu, X, LayoutDashboard, Search, Sparkles, History } from 'lucide-react';
 
 /* ── Google Antigravity System Tokens ── */
 const THEME = `
@@ -74,7 +75,7 @@ export default function App() {
 
   const MOBILE_TABS = [
     { key: 'landing', label: 'Overview', icon: LayoutDashboard },
-    { key: 'score', label: 'Score Ticker', icon: Target },
+    { key: 'search', label: 'Ticker Search', icon: Search },
     { key: 'digest', label: 'Latest Picks', icon: Sparkles },
     { key: 'history', label: 'Score History', icon: History },
   ];
@@ -295,52 +296,25 @@ export default function App() {
             >
               {activeTab === 'landing' ? (
                 <LandingPage
-                  onLaunchTool={(tab = 'score') => setActiveTab(tab)}
+                  onLaunchTool={(tab = 'search') => setActiveTab(tab)}
                   onSelectTicker={(ticker, guest) => {
                     setPrefilledTicker(ticker);
                     setPrefilledGuest(guest);
-                    setActiveTab('score');
+                    setActiveTab('search');
                   }}
                   onSelectGuest={(guest) => setSelectedGuest(guest)}
                 />
-              ) : activeTab === 'score' ? (
-                <>
-                  {/* Tool Screen: Dense, straight into function, NO HERO TITLE */}
-                  <MarketCallBar
-                    onSelectTicker={(ticker, guest) => {
-                      setPrefilledTicker(ticker);
-                      setPrefilledGuest(guest);
-                    }}
-                    onSelectGuest={(guest) => setSelectedGuest(guest)}
-                  />
-
-                  <ScoreForm
-                    onScore={handleScore}
-                    loading={loading}
-                    prefilledTicker={prefilledTicker}
-                    prefilledGuest={prefilledGuest}
-                  />
-
-                  {scorecards.length > 1 && (
-                    <ComparisonMatrix
-                      scorecards={scorecards}
-                      comparisonResult={comparisonResult}
-                    />
-                  )}
-
-                  <ScorecardGrid
-                    scorecards={scorecards}
-                    loadingTickers={loadingTickers}
-                    holdPeriod={currentHoldPeriod}
-                    onSelectGuest={(guest) => setSelectedGuest(guest)}
-                  />
-                </>
+              ) : activeTab === 'score' || activeTab === 'search' ? (
+                <TickerSearch
+                  prefilledTicker={prefilledTicker}
+                  onSelectGuest={(guest) => setSelectedGuest(guest)}
+                />
               ) : activeTab === 'digest' ? (
                 <DigestView
                   onScoreTicker={(ticker, guest) => {
                     setPrefilledTicker(ticker);
                     setPrefilledGuest(guest);
-                    setActiveTab('score');
+                    setActiveTab('search');
                   }}
                   onSelectGuest={(guest) => setSelectedGuest(guest)}
                   onOpenSettings={() => setShowSettings(true)}
@@ -349,7 +323,7 @@ export default function App() {
                 <HistoryTab
                   onSelectTicker={(ticker) => {
                     setPrefilledTicker(ticker);
-                    setActiveTab('score');
+                    setActiveTab('search');
                   }}
                 />
               )}
