@@ -5,20 +5,10 @@ import {
   getKeys,
   getProvider,
 } from './lib/storage';
-import { fetchTickerData } from './lib/finnhub';
-import { fetchAlphaVantageData } from './lib/alphavantage';
-import { calculateScore } from './lib/calculateScore';
-import { buildPrompt, buildComparisonPrompt } from './lib/promptBuilder';
-import { scoreWithLLM } from './lib/scorer';
-import { resolveOutcomes, saveScoreToHistory } from './lib/historyManager';
-import KeySetup from './components/KeySetup';
-import ScoreForm from './components/ScoreForm';
-import ScorecardGrid from './components/ScorecardGrid';
+import { resolveOutcomes } from './lib/historyManager';
 import Disclaimer from './components/Disclaimer';
 import SettingsPanel from './components/SettingsPanel';
 import HistoryTab from './components/HistoryTab';
-import ComparisonMatrix from './components/ComparisonMatrix';
-import MarketCallBar from './components/MarketCallBar';
 import GuestModal from './components/GuestModal';
 import TickerSearch from './components/TickerSearch';
 import DigestView from './components/DigestView';

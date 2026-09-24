@@ -221,3 +221,4 @@ __marimo__/
 node_modules/
 dist/
 scratch/
+backup_scoring/
