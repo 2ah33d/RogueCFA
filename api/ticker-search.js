@@ -19,6 +19,20 @@ export default async function handler(req, res) {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10), 1), 100);
     const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
 
+    /* If no query is provided, return empty results immediately */
+    if (!q) {
+      return res.status(200).json({
+        query: '',
+        sort,
+        stanceFilter,
+        total: 0,
+        limit,
+        offset: 0,
+        hasMore: false,
+        results: [],
+      });
+    }
+
     /* Fetch all completed digest jobs from Supabase */
     const { data: dbRows, error: dbError } = await supabase
       .from('digest_jobs')
