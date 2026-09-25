@@ -12,7 +12,7 @@ function AnalystMentionPill({ mention, onSelectGuest }) {
   const [isOpen, setIsOpen] = useState(false);
 
   const formattedDate = useMemo(() => {
-    if (!mention.date || mention.date === 'Recent') return 'Recent';
+    if (!mention?.date || mention.date === 'Recent') return 'Recent';
     try {
       const [y, m, d] = mention.date.split('-');
       if (y && m && d) {
@@ -21,9 +21,11 @@ function AnalystMentionPill({ mention, onSelectGuest }) {
       }
       return mention.date;
     } catch {
-      return mention.date;
+      return mention.date || 'Recent';
     }
-  }, [mention.date]);
+  }, [mention?.date]);
+
+  if (!mention) return null;
 
   const isPick = mention.mentionType === 'pick';
   const stance = mention.stance?.toLowerCase();
@@ -243,6 +245,8 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
     }));
   }
 
+  const rejectedTickers = llmResult?._rejectedTickers || [];
+
   /* Create quick lookup map for candidate details, merging API shortlists with local candidates */
   const candidateMap = useMemo(() => {
     const map = new Map();
@@ -253,6 +257,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
       ...sellCandidates,
     ];
     all.forEach((cand) => {
+      if (!cand || !cand.ticker) return;
       const existing = map.get(cand.ticker);
       if (!existing || (cand.mentions && cand.mentions.length > (existing.mentions?.length || 0))) {
         map.set(cand.ticker, cand);
@@ -333,13 +338,16 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {goldenPicks.map((pick) => {
-              const cand = candidateMap.get(pick.ticker);
-              const company = cand?.company || pick.ticker;
+            {goldenPicks.map((pick, pIdx) => {
+              const ticker = typeof pick === 'string' ? pick : (pick?.ticker || '');
+              if (!ticker) return null;
+              const rationale = typeof pick === 'string' ? 'Multi-analyst convergence candidate.' : (pick?.rationale || '');
+              const cand = candidateMap.get(ticker);
+              const company = cand?.company || ticker;
 
               return (
                 <div
-                  key={pick.ticker}
+                  key={ticker || pIdx}
                   className="bg-surface-card border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-5 shadow-lg shadow-amber-950/10 transition-all group relative flex flex-col justify-between"
                 >
                   <div className="space-y-3.5">
@@ -348,7 +356,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-lg font-extrabold text-prime group-hover:text-amber-400 transition-colors">
-                            {pick.ticker}
+                            {ticker}
                           </span>
                           <span className="px-2 py-0.5 text-[9px] font-sans font-bold bg-amber-400/15 border border-amber-400/35 text-amber-300 rounded-md">
                             {isAiCurated ? 'AI CONVICTION' : 'SHORTLIST CANDIDATE'}
@@ -374,7 +382,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                       <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">
                         <span>✨ Conviction Rationale</span>
                       </div>
-                      <p>{pick.rationale}</p>
+                      <p>{rationale}</p>
                     </div>
 
                     {/* Collapsible Analyst Commentary Pills (Subtle Grey) */}
@@ -429,24 +437,27 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {warningSells.map((sell) => {
-              const cand = candidateMap.get(sell.ticker);
+            {warningSells.map((sell, sIdx) => {
+              const ticker = typeof sell === 'string' ? sell : (sell?.ticker || '');
+              if (!ticker) return null;
+              const rationale = typeof sell === 'string' ? 'Multi-analyst warning sell candidate.' : (sell?.rationale || '');
+              const cand = candidateMap.get(ticker);
 
               return (
                 <div
-                  key={sell.ticker}
+                  key={ticker || sIdx}
                   className="bg-rose-950/15 border border-rose-500/30 rounded-2xl p-5 shadow-lg shadow-rose-950/10 flex flex-col justify-between"
                 >
                   <div className="space-y-3.5">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-lg font-extrabold text-rose-300">{sell.ticker}</span>
+                          <span className="text-lg font-extrabold text-rose-300">{ticker}</span>
                           <span className="px-2 py-0.5 text-[9px] font-sans font-bold bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-md">
                             WARNING SELL
                           </span>
                         </div>
-                        <p className="text-xs text-dim line-clamp-1">{cand?.company || sell.ticker}</p>
+                        <p className="text-xs text-dim line-clamp-1">{cand?.company || ticker}</p>
                       </div>
                       {cand && (
                         <span className="text-xs font-bold text-rose-400">{cand.weightedScore} SCORE</span>
@@ -458,7 +469,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                       <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-rose-400 mb-1">
                         <span>⚠️ Risk Summary</span>
                       </div>
-                      <p>{sell.rationale}</p>
+                      <p>{rationale}</p>
                     </div>
 
                     {/* Collapsible Analyst Commentary Pills for Warning Sells */}

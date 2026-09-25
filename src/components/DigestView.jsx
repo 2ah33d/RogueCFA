@@ -193,29 +193,15 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
           const validDates = new Set(data.history.filter((h) => h && h.digest).map((h) => h.episodeDate));
           const newestValid = data.history.find((h) => h && h.digest);
 
-          /* 1. Stale Cache Auto-Advance: If the DB has a newer completed episode than what was cached in localStorage, auto-advance to it! */
-          if (newestValid && (!cached?.episodeDate || newestValid.episodeDate > cached.episodeDate)) {
-            setDigest(newestValid.digest);
-            setSelectedDate(newestValid.episodeDate);
-            setVideoInfo({
-              videoId: newestValid.videoId || '',
-              videoTitle: newestValid.videoTitle || `BNN Bloomberg MarketCall (${newestValid.episodeDate})`,
-              episodeDate: newestValid.episodeDate,
-            });
-            const updatedCache = {
-              digest: newestValid.digest,
-              videoId: newestValid.videoId || '',
-              videoTitle: newestValid.videoTitle || `BNN Bloomberg MarketCall (${newestValid.episodeDate})`,
-              episodeDate: newestValid.episodeDate,
-              generatedAt: newestValid.generatedAt,
-            };
-            saveDigestCache('latest_marketcall', updatedCache);
-            saveDigestCache(newestValid.episodeDate, updatedCache);
-          } else if (cached && cached.episodeDate && !validDates.has(cached.episodeDate)) {
-            /* Row was deleted from DB — clear stale local storage cache */
-            saveDigestCache('latest_marketcall', null);
-            saveDigestCache(cached.episodeDate, null);
-            if (newestValid) {
+          /* Sync latest completed episode from DB if cache is missing or stale */
+          if (newestValid && newestValid.digest) {
+            const isStaleOrMissing =
+              !cached?.digest ||
+              !cached?.episodeDate ||
+              newestValid.episodeDate > cached.episodeDate ||
+              !validDates.has(cached.episodeDate);
+
+            if (isStaleOrMissing) {
               setDigest(newestValid.digest);
               setSelectedDate(newestValid.episodeDate);
               setVideoInfo({
@@ -223,27 +209,28 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                 videoTitle: newestValid.videoTitle || `BNN Bloomberg MarketCall (${newestValid.episodeDate})`,
                 episodeDate: newestValid.episodeDate,
               });
-            } else {
-              setDigest(null);
+              const updatedCache = {
+                digest: newestValid.digest,
+                videoId: newestValid.videoId || '',
+                videoTitle: newestValid.videoTitle || `BNN Bloomberg MarketCall (${newestValid.episodeDate})`,
+                episodeDate: newestValid.episodeDate,
+                generatedAt: newestValid.generatedAt,
+              };
+              saveDigestCache('latest_marketcall', updatedCache);
+              saveDigestCache(newestValid.episodeDate, updatedCache);
             }
-            /* If DB has a different videoId (e.g. newly discovered, or stripped due to date mismatch), sync it */
-            const matchingDBRow = data.history.find((h) => h.episodeDate === cached.episodeDate);
-            if (matchingDBRow && (cached.videoId || '') !== (matchingDBRow.videoId || '')) {
+          }
+
+          /* If DB has updated videoId for the active episode, sync it */
+          const activeDate = cached?.episodeDate || newestValid?.episodeDate;
+          if (activeDate) {
+            const matchingDBRow = data.history.find((h) => h.episodeDate === activeDate);
+            if (matchingDBRow && (videoInfo?.videoId || '') !== (matchingDBRow.videoId || '')) {
               setVideoInfo((prev) => ({
                 ...prev,
                 videoId: matchingDBRow.videoId || '',
                 videoTitle: matchingDBRow.videoTitle || prev?.videoTitle,
               }));
-              saveDigestCache(cached.episodeDate, {
-                ...cached,
-                videoId: matchingDBRow.videoId || '',
-                videoTitle: matchingDBRow.videoTitle || cached.videoTitle,
-              });
-              saveDigestCache('latest_marketcall', {
-                ...cached,
-                videoId: matchingDBRow.videoId || '',
-                videoTitle: matchingDBRow.videoTitle || cached.videoTitle,
-              });
             }
           }
         }
@@ -768,6 +755,39 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
 
   /* Helper to load the most recent saved digest from history */
   const handleBackToLastSaved = async () => {
+    // 1. Instantaneous restore from in-memory history episodes
+    if (historyEpisodes && historyEpisodes.length > 0) {
+      const latestMem = historyEpisodes.find((h) => h && h.digest);
+      if (latestMem && latestMem.digest) {
+        const epDate = latestMem.episodeDate || todayStr;
+        setSelectedDate(epDate);
+        setDigest(latestMem.digest);
+        setVideoInfo({
+          videoId: latestMem.videoId || '',
+          videoTitle: latestMem.videoTitle || `BNN Bloomberg MarketCall (${epDate})`,
+          episodeDate: epDate,
+        });
+        setError(null);
+        return;
+      }
+    }
+
+    // 2. Instantaneous restore from localStorage cache
+    const cachedLatest = getDigestCache('latest_marketcall');
+    if (cachedLatest && cachedLatest.digest) {
+      const epDate = cachedLatest.episodeDate || todayStr;
+      setSelectedDate(epDate);
+      setDigest(cachedLatest.digest);
+      setVideoInfo({
+        videoId: cachedLatest.videoId || '',
+        videoTitle: cachedLatest.videoTitle || `BNN Bloomberg MarketCall (${epDate})`,
+        episodeDate: epDate,
+      });
+      setError(null);
+      return;
+    }
+
+    // 3. Fallback to API fetch if memory and cache are empty
     try {
       setLoading(true);
       const res = await fetch('/api/marketcall-history?limit=10');

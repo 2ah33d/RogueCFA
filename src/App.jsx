@@ -14,6 +14,7 @@ import TickerSearch from './components/TickerSearch';
 import DigestView from './components/DigestView';
 import LandingPage from './components/LandingPage';
 import NavPill from './components/NavPill';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Menu, X, LayoutDashboard, Search, Sparkles, History } from 'lucide-react';
 
 /* ── Google Antigravity System Tokens ── */
@@ -295,20 +296,24 @@ export default function App() {
                   onSelectGuest={(guest) => setSelectedGuest(guest)}
                 />
               ) : activeTab === 'score' || activeTab === 'search' ? (
-                <TickerSearch
-                  prefilledTicker={prefilledTicker}
-                  onSelectGuest={(guest) => setSelectedGuest(guest)}
-                />
+                <ErrorBoundary fallbackTitle="Ticker Search encountered an issue">
+                  <TickerSearch
+                    prefilledTicker={prefilledTicker}
+                    onSelectGuest={(guest) => setSelectedGuest(guest)}
+                  />
+                </ErrorBoundary>
               ) : activeTab === 'digest' ? (
-                <DigestView
-                  onScoreTicker={(ticker, guest) => {
-                    setPrefilledTicker(ticker);
-                    setPrefilledGuest(guest);
-                    setActiveTab('search');
-                  }}
-                  onSelectGuest={(guest) => setSelectedGuest(guest)}
-                  onOpenSettings={() => setShowSettings(true)}
-                />
+                <ErrorBoundary fallbackTitle="Latest Picks encountered an issue">
+                  <DigestView
+                    onScoreTicker={(ticker, guest) => {
+                      setPrefilledTicker(ticker);
+                      setPrefilledGuest(guest);
+                      setActiveTab('search');
+                    }}
+                    onSelectGuest={(guest) => setSelectedGuest(guest)}
+                    onOpenSettings={() => setShowSettings(true)}
+                  />
+                </ErrorBoundary>
               ) : (
                 <HistoryTab
                   onSelectTicker={(ticker) => {

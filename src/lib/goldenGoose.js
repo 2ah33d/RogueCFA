@@ -135,9 +135,11 @@ export function buildShortlists(episodes = [], windowDays = 7) {
 
   for (const agg of Object.values(tickerAgg)) {
     /* One mention per unique epKey — dedup happens here */
-    const deduped = [...agg.seenEpKeys].map((key) => agg.mentions.find((m) => m.epKey === key));
+    const deduped = [...agg.seenEpKeys]
+      .map((key) => agg.mentions.find((m) => m.epKey === key))
+      .filter(Boolean);
 
-    const buyHoldCount = deduped.filter((m) => m.stance === 'buy' || m.stance === 'hold').length;
+    const buyHoldCount = deduped.filter((m) => m && (m.stance === 'buy' || m.stance === 'hold')).length;
     const sellCount = deduped.filter((m) => m.stance === 'sell').length;
     const weightedTotal = deduped.reduce((sum, m) => sum + weightedScore(m), 0);
 
