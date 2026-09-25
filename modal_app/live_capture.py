@@ -17,12 +17,12 @@ app = modal.App("roguecfa-live-capture")
 PRIMARY_STREAM_URL = os.environ.get("BNN_LIVE_STREAM_URL") or "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNN_ADP.m3u8"
 FALLBACK_STREAM_URLS = [
     "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNN_ADP.aac",
-    "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNNAAC.m3u8",
     "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNNAAC.aac",
+    "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNNAAC.m3u8",
 ]
 
 def resolve_and_verify_stream(url: str) -> str:
-    """Follow HTTP 302 redirects to find the active live edge server node (e.g. 18153, 29313)."""
+    """Follow HTTP 302 redirects to find and verify the active live edge server node (e.g. 18153, 29313)."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -30,11 +30,14 @@ def resolve_and_verify_stream(url: str) -> str:
         }
         res = requests.get(url, headers=headers, allow_redirects=True, timeout=12)
         if res.status_code == 200 and res.url:
-            print(f"Resolved live stream: {url} -> {res.url} (Status: {res.status_code})")
+            print(f"Resolved & verified live stream: {url} -> {res.url} (Status: {res.status_code})")
             return res.url
+        else:
+            print(f"Candidate {url} resolved to dead/forbidden node {res.url} (HTTP {res.status_code}). Skipping.")
+            return None
     except Exception as err:
         print(f"Warning: Stream resolution failed for {url}: {err}")
-    return url
+    return None
 
 @app.function(
     image=app_image,
@@ -184,6 +187,10 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
                 break
 
             resolved_url = resolve_and_verify_stream(candidate_url)
+            if not resolved_url:
+                print(f"Skipping candidate {candidate_url} — edge node verification failed.")
+                continue
+
             print(f"Attempting capture with stream candidate: {candidate_url} (resolved to {resolved_url})")
 
             # 2a: Try Streamlink if candidate resolves to HLS (.m3u8)
