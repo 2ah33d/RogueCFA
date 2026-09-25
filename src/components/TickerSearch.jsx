@@ -67,9 +67,40 @@ function formatDate(dateStr) {
 }
 
 /**
+ * Highlight matching search keywords inside text cleanly with blue theme styling
+ */
+function HighlightMatch({ text, query }) {
+  if (!text || !query) return <>{text}</>;
+  const terms = query.trim().split(/\s+/).filter((t) => t.length >= 2);
+  if (terms.length === 0) return <>{text}</>;
+
+  try {
+    const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = String(text).split(regex);
+
+    return (
+      <>
+        {parts.map((part, i) =>
+          regex.test(part) ? (
+            <mark key={i} className="bg-accent/30 text-prime font-semibold px-0.5 rounded">
+              {part}
+            </mark>
+          ) : (
+            part
+          )
+        )}
+      </>
+    );
+  } catch {
+    return <>{text}</>;
+  }
+}
+
+/**
  * Individual Mention Card — 2-column grid layout styled consistently with daily digest bubbles
  */
-function MentionCard({ mention, onSelectGuest }) {
+function MentionCard({ mention, searchQuery, onSelectGuest }) {
   const [expanded, setExpanded] = useState(false);
   const reasoning = mention.reasoning || '';
   const isLong = reasoning.length > 180;
@@ -89,13 +120,23 @@ function MentionCard({ mention, onSelectGuest }) {
                 {mention.segment}
               </span>
             )}
+            {mention.matchedField === 'reasoning' && (
+              <span className="text-[10px] font-medium text-accent bg-accent/15 px-2 py-0.5 rounded-full border border-accent/25">
+                Keyword in Thesis
+              </span>
+            )}
+            {mention.matchedField === 'guest' && (
+              <span className="text-[10px] font-medium text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/25">
+                Analyst Match
+              </span>
+            )}
           </div>
           <div>{renderStanceFlag(mention.stance)}</div>
         </div>
 
         {/* Company Title */}
         <h4 className="text-base font-semibold text-prime truncate leading-snug">
-          {mention.company || mention.ticker}
+          <HighlightMatch text={mention.company || mention.ticker} query={searchQuery} />
         </h4>
 
         {/* Episode Date & Guest Analyst Link */}
@@ -113,14 +154,16 @@ function MentionCard({ mention, onSelectGuest }) {
               className="text-dim hover:text-accent font-medium transition-colors cursor-pointer"
               title={`View ${mention.guest}'s track record`}
             >
-              {mention.guest}
+              <HighlightMatch text={mention.guest} query={searchQuery} />
             </button>
           </span>
         </div>
 
         {/* Analyst Commentary with Legible Blue Accent Border */}
         <div className="bg-surface-elevated/50 border-l-2 border-accent rounded-r-xl p-3.5 text-xs text-prime/90 leading-relaxed font-sans">
-          <p className="italic">"{displayText}"</p>
+          <p className="italic">
+            "<HighlightMatch text={displayText} query={searchQuery} />"
+          </p>
           {isLong && (
             <button
               type="button"
@@ -260,13 +303,13 @@ export default function TickerSearch({ prefilledTicker = '', onSelectGuest }) {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2.5 mb-1">
-              <h2 className="text-lg font-bold text-prime tracking-tight">Ticker &amp; Stock Search</h2>
+              <h2 className="text-lg font-bold text-prime tracking-tight">Broadcast Archive Search</h2>
               <span className="px-2.5 py-0.5 text-[10px] font-semibold uppercase bg-accent/15 border border-accent/30 text-accent rounded-full">
-                Archive
+                Database
               </span>
             </div>
             <p className="text-xs text-dim">
-              Explore historical analyst calls, top picks, and caller Q&amp;A commentary across recorded shows.
+              Search 2 months of analyst calls by ticker, company name, colloquial alias (e.g. RBC), guest analyst, or commentary keywords.
             </p>
           </div>
 
@@ -288,7 +331,7 @@ export default function TickerSearch({ prefilledTicker = '', onSelectGuest }) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search ticker or company (e.g. RY, TD, UBER, Enbridge)..."
+            placeholder="Search ticker, company, alias, guest, or keyword (e.g. RY, RBC, royal bank, dividend, Caldwell, oil)..."
             className="w-full pl-11 pr-10 py-3 bg-surface-elevated rounded-xl
                        text-prime text-sm font-semibold font-sans placeholder:font-normal placeholder:text-dim/50
                        focus:outline-none focus:ring-2 focus:ring-accent/40 transition-all shadow-inner border border-transparent"
@@ -375,17 +418,17 @@ export default function TickerSearch({ prefilledTicker = '', onSelectGuest }) {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
           </svg>
-          <p className="text-xs">Searching broadcast archive...</p>
+          <p className="text-xs">Searching 2-month broadcast archive...</p>
         </div>
       ) : !hasSearchQuery ? (
         /* Empty Query State — Helpful clean invite card */
-        <div className="bg-surface-card border border-surface-elevated/40 rounded-2xl p-10 text-center text-dim space-y-3 shadow-antigravity max-w-xl mx-auto">
+        <div className="bg-surface-card border border-surface-elevated/40 rounded-2xl p-10 text-center text-dim space-y-3.5 shadow-antigravity max-w-xl mx-auto">
           <div className="w-10 h-10 mx-auto rounded-full bg-accent/15 border border-accent/30 flex items-center justify-center text-accent">
             <Search className="w-5 h-5" />
           </div>
           <h3 className="text-sm font-bold text-prime">Search 2 Months of Broadcast History</h3>
           <p className="text-xs text-dim leading-relaxed max-w-md mx-auto">
-            Enter a ticker symbol (e.g. <span className="text-prime font-semibold">RY</span>, <span className="text-prime font-semibold">TD</span>, <span className="text-prime font-semibold">UBER</span>, <span className="text-prime font-semibold">SHOP</span>) or company name above to find analyst commentary, top picks, and caller Q&amp;A.
+            Search by ticker (e.g. <span className="text-prime font-semibold">RY</span>), company or colloquial alias (e.g. <span className="text-prime font-semibold">RBC</span>, <span className="text-prime font-semibold">Scotiabank</span>), guest analyst (e.g. <span className="text-prime font-semibold">Caldwell</span>), or investment thesis keyword (e.g. <span className="text-prime font-semibold">dividend</span>, <span className="text-prime font-semibold">oil</span>, <span className="text-prime font-semibold">AI</span>).
           </p>
         </div>
       ) : results.length > 0 ? (
@@ -396,6 +439,7 @@ export default function TickerSearch({ prefilledTicker = '', onSelectGuest }) {
               <MentionCard
                 key={mention.id}
                 mention={mention}
+                searchQuery={debouncedQuery}
                 onSelectGuest={onSelectGuest}
               />
             ))}
@@ -440,7 +484,7 @@ export default function TickerSearch({ prefilledTicker = '', onSelectGuest }) {
             No mentions found for "{debouncedQuery}"
           </h3>
           <p className="text-xs text-dim leading-relaxed max-w-sm mx-auto">
-            Try searching by ticker (e.g. RY, TD, UBER, CNQ) or general company keywords (e.g. Bank, Energy, Tech).
+            Try searching by Canadian/US ticker (e.g. RY, TD, UBER), company alias (e.g. RBC, Scotiabank), guest analyst (e.g. Caldwell), or investment topic (e.g. dividend, energy).
           </p>
         </div>
       )}
