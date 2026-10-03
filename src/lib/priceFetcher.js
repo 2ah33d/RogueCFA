@@ -102,9 +102,43 @@ export function setCachedPrice(ticker, quoteData) {
   }
 }
 
+export const CANADIAN_TITANS = new Set([
+  'RY', 'TD', 'BMO', 'BNS', 'CM', 'ENB', 'TRP', 'SU', 'CNQ', 'CNR', 'CP', 'BCE', 'T',
+  'RCI', 'ATZ', 'SHOP', 'CSU', 'L', 'DOL', 'POW', 'MFC', 'SLF', 'BAM', 'BN', 'NTR',
+  'WCN', 'OTEX', 'TRI', 'TOU', 'ARX', 'IMO', 'CVE', 'GWO', 'IFC', 'EMA', 'FTS', 'AQN',
+  'WN', 'MRU', 'CTC', 'MG', 'CCL', 'QSR', 'CCA', 'CGO', 'CJR', 'EFN', 'EIF', 'TIH',
+  'WSP', 'STN', 'GFL', 'K', 'ABX', 'AEM', 'FNV', 'WPM', 'NPI', 'BLX', 'INE', 'CPX'
+]);
+
 /**
- * Batch fetch prices for multiple tickers in a single HTTP request.
+ * Infer whether a stock is Canadian (TSX in CAD) or US (NYSE/NASDAQ in USD)
+ * based on quote metadata, ticker suffix, known Canadian companies, or transcript discussion context.
+ */
+export function detectStockMarket(ticker, company = '', reasoning = '', quote = null) {
+  if (quote?.market) return quote.market;
+  if (quote?.currency === 'CAD') return 'CAD';
+  if (quote?.currency === 'USD') return 'US';
+
+  const t = (ticker || '').trim().toUpperCase();
+  if (t.endsWith('.TO') || t.endsWith('.V') || t.endsWith('.CN') || t.includes('TSX')) return 'CAD';
+  const base = t.replace(/\.(TO|TSX|V|CN)$/i, '');
+  if (CANADIAN_TITANS.has(base)) return 'CAD';
+
+  const text = `${company} ${reasoning}`.toLowerCase();
+  if (text.includes('tsx') || text.includes('toronto') || text.includes('cad') || text.includes('canadian') || text.includes('bay street') || text.includes('calgary') || text.includes('montreal') || text.includes('vancouver')) {
+    return 'CAD';
+  }
+  if (text.includes('nyse') || text.includes('nasdaq') || text.includes('usd') || text.includes('s&p 500') || text.includes('wall street') || text.includes('us market') || text.includes('american')) {
+    return 'US';
+  }
+
+  return 'US';
+}
+
+/**
+ * Batch fetch prices for multiple tickers in HTTP requests.
  * Normalizes and sorts tickers to ensure exact Vercel Edge cache hits.
+ * Automatically chunks large requests to avoid URL length or serverless batch limits.
  */
 export async function fetchBatchStockPrices(tickers = [], force = false) {
   if (!Array.isArray(tickers) || tickers.length === 0) return {};
@@ -133,27 +167,37 @@ export async function fetchBatchStockPrices(tickers = [], force = false) {
     return results;
   }
 
-  try {
-    // Alphabetize to match server edge-cache URL normalization
-    const sortedParam = toFetch.slice().sort().join(',');
-    const res = await fetch(`/api/quote?tickers=${encodeURIComponent(sortedParam)}`);
-    if (res.ok) {
-      const data = await res.json();
-      const quotes = data?.quotes || {};
-
-      for (const t of toFetch) {
-        const q = quotes[t];
-        if (q && typeof q.price === 'number') {
-          setCachedPrice(t, q);
-          results[t] = q;
-        } else {
-          results[t] = null;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[priceFetcher] Batch fetch error:', err.message);
+  // Chunk toFetch into batches of 35 to stay safely within URL limits and Edge cache bounds
+  const CHUNK_SIZE = 35;
+  const chunks = [];
+  for (let i = 0; i < toFetch.length; i += CHUNK_SIZE) {
+    chunks.push(toFetch.slice(i, i + CHUNK_SIZE));
   }
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const sortedParam = chunk.slice().sort().join(',');
+        const res = await fetch(`/api/quote?tickers=${encodeURIComponent(sortedParam)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const quotes = data?.quotes || {};
+
+          for (const t of chunk) {
+            const q = quotes[t] || quotes[t.replace(/\.(TO|TSX)$/i, '')];
+            if (q && typeof q.price === 'number') {
+              setCachedPrice(t, q);
+              results[t] = q;
+            } else {
+              results[t] = null;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[priceFetcher] Batch chunk error:', err.message);
+      }
+    })
+  );
 
   return results;
 }
@@ -283,11 +327,21 @@ export function useBatchLivePrices(tickers = [], { enabled = true } = {}) {
   return {
     quotes,
     loading,
-    getPrice: (t) => (t ? quotes[t.trim().toUpperCase()] : null),
+    getPrice: (t) => {
+      if (!t) return null;
+      const clean = t.trim().toUpperCase();
+      return quotes[clean]?.price ?? quotes[clean.replace(/\.(TO|TSX)$/i, '')]?.price ?? null;
+    },
+    getQuote: (t) => {
+      if (!t) return null;
+      const clean = t.trim().toUpperCase();
+      return quotes[clean] || quotes[clean.replace(/\.(TO|TSX)$/i, '')] || null;
+    },
     formatTickerPrice: (t) => {
       if (!t) return null;
-      const q = quotes[t.trim().toUpperCase()];
-      return q ? formatStockPrice(q.price, q.currency) : null;
+      const clean = t.trim().toUpperCase();
+      const q = quotes[clean] || quotes[clean.replace(/\.(TO|TSX)$/i, '')];
+      return q && typeof q.price === 'number' ? formatStockPrice(q.price, q.currency) : null;
     },
     refetch: () => loadBatch(true),
   };

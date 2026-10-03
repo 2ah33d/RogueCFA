@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { getGuestTrackRecord } from '../lib/guestTracker';
+import { ScoreCircle } from './AnalystBubble';
 
 /**
  * GuestModal — Google Antigravity aesthetic: 16px (rounded-2xl) modal, soft elevation shadow, task-status pills.
@@ -54,6 +55,16 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
   const isNoTrackRecord = !loading && liveRecord && liveRecord.status === 'no_track_record' && (!localSeedRecord || localSeedRecord.totalPicks === 0);
   const hasEnoughData = record && record.resolvedPicks >= 3 && record.hitRate !== null;
   const picksList = record?.picks || [];
+
+  /* Scaled hit rate (Bayesian-shrunk composite rating matching AnalystBubble) */
+  let scaledScore = null;
+  if (record?.credibilityScore != null) {
+    scaledScore = Math.round(record.credibilityScore);
+  } else if (record?.hitRate != null) {
+    scaledScore = Math.round(record.hitRate * 100);
+  } else if (record?.optimalHorizonHitRate != null) {
+    scaledScore = Math.round(record.optimalHorizonHitRate * 100);
+  }
 
   let bodyContent = null;
 
@@ -162,7 +173,14 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
           </div>
 
           <div className="bg-surface-elevated p-4 rounded-xl shadow-antigravity">
-            <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Top Pick Hit Rate</span>
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Top Pick Hit Rate</span>
+              {scaledScore != null && (
+                <span className="text-[10px] font-bold text-accent bg-accent/15 px-2 py-0.5 rounded-full" title="Scaled Hit Rate (empirical Bayes prior-adjusted rating)">
+                  Scaled: {scaledScore}%
+                </span>
+              )}
+            </div>
             {record.hitRate !== null ? (
               <>
                 <span
@@ -172,7 +190,7 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
                 >
                   {(record.hitRate * 100).toFixed(0)}%
                 </span>
-                <span className="text-[11px] text-dim">{record.hitCount || record.correctPicks || 0} winning picks</span>
+                <span className="text-[11px] text-dim">{record.hitCount || record.correctPicks || 0} winning picks (raw win rate)</span>
               </>
             ) : (
               <span className="text-xs font-normal text-dim italic mt-1 block">Pending</span>
@@ -312,7 +330,7 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
                 </table>
               </div>
               <p className="text-[11px] text-dim/80 italic leading-relaxed pt-1">
-                * Hit Rate = Percentage of formal on-air Top Picks that outperformed the S&amp;P/TSX Composite over a fixed 90-day holding period.
+                * Raw Hit Rate ({((record?.hitRate ?? 0) * 100).toFixed(0)}%) = Percentage of formal on-air Top Picks that outperformed the S&amp;P/TSX Composite over a fixed 90-day holding period ({record?.hitCount || record?.correctPicks || 0} of {record?.totalPicks || picksList.length} winning picks). Scaled Hit Rate ({scaledScore}%) applies empirical Bayesian shrinkage against market prior to normalize for sample size.
               </p>
             </div>
           )}
@@ -351,14 +369,29 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
               Historical accuracy and performance verification
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 text-dim hover:text-prime hover:bg-surface-elevated rounded-full transition-colors text-base"
-            title="Close modal (Esc)"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-3.5">
+            {scaledScore != null && (
+              <div className="flex items-center gap-2.5 bg-surface-elevated/70 px-3 py-1.5 rounded-2xl border border-edge/30">
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-dim uppercase tracking-wider block leading-tight">
+                    Scaled Hit Rate
+                  </span>
+                  <span className="text-[10px] text-dim/60 leading-tight">
+                    Bayes-Adjusted
+                  </span>
+                </div>
+                <ScoreCircle score={scaledScore} loading={loading} label="Scaled" />
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 text-dim hover:text-prime hover:bg-surface-elevated rounded-full transition-colors text-base"
+              title="Close modal (Esc)"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}

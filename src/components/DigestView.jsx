@@ -140,7 +140,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     return Array.from(set);
   }, [digest]);
 
-  const { formatTickerPrice } = useBatchLivePrices(allDigestTickers, {
+  const { formatTickerPrice, getQuote } = useBatchLivePrices(allDigestTickers, {
     enabled: Boolean(digest && allDigestTickers.length > 0),
   });
 
@@ -1330,6 +1330,8 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                     index={idx}
                     stance={pick.stance || 'buy'}
                     priceFormatted={formatTickerPrice(pick.ticker)}
+                    quote={getQuote(pick.ticker)}
+                    market={pick.country || pick.market}
                   />
                 ))}
               </div>
@@ -1358,6 +1360,8 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                     isCallerMention={true}
                     stance={pick.stance}
                     priceFormatted={formatTickerPrice(pick.ticker)}
+                    quote={getQuote(pick.ticker)}
+                    market={pick.country || pick.market}
                   />
                 ))}
               </div>
@@ -1386,6 +1390,8 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                     isCallerMention={true}
                     stance={pick.action === 'exited_loss' || pick.action === 'exited_gain' ? 'sell' : 'hold'}
                     priceFormatted={formatTickerPrice(pick.ticker)}
+                    quote={getQuote(pick.ticker)}
+                    market={pick.country || pick.market}
                   />
                 ))}
               </div>

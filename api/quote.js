@@ -49,6 +49,14 @@ async function fetchFinnhubFallback(cleanTicker) {
   return null;
 }
 
+const CANADIAN_TITANS = new Set([
+  'RY', 'TD', 'BMO', 'BNS', 'CM', 'ENB', 'TRP', 'SU', 'CNQ', 'CNR', 'CP', 'BCE', 'T',
+  'RCI', 'ATZ', 'SHOP', 'CSU', 'L', 'DOL', 'POW', 'MFC', 'SLF', 'BAM', 'BN', 'NTR',
+  'WCN', 'OTEX', 'TRI', 'TOU', 'ARX', 'IMO', 'CVE', 'GWO', 'IFC', 'EMA', 'FTS', 'AQN',
+  'WN', 'MRU', 'CTC', 'MG', 'CCL', 'QSR', 'CCA', 'CGO', 'CJR', 'EFN', 'EIF', 'TIH',
+  'WSP', 'STN', 'GFL', 'K', 'ABX', 'AEM', 'FNV', 'WPM', 'NPI', 'BLX', 'INE', 'CPX'
+]);
+
 /**
  * Fetch quote from Yahoo Finance chart endpoint with smart fallback for TSX.
  */
@@ -66,8 +74,13 @@ async function fetchYahooQuote(rawTicker) {
 
   // Build candidate symbols:
   // If user already specified an exchange (e.g. SHOP.TO or AAPL.US), query that directly.
-  // Otherwise, try clean ticker first, then clean + '.TO' (for Canadian TSX listings).
-  const candidates = clean.includes('.') ? [clean] : [clean, `${clean}.TO`];
+  // If ticker is a known Canadian titan or ends with TSX marker, prioritize .TO first.
+  const isCanadianTitan = CANADIAN_TITANS.has(clean.replace(/\.(TO|TSX|V|CN)$/i, ''));
+  const candidates = clean.includes('.')
+    ? [clean]
+    : isCanadianTitan
+    ? [`${clean}.TO`, clean]
+    : [clean, `${clean}.TO`];
 
   for (const symbol of candidates) {
     try {
@@ -86,11 +99,13 @@ async function fetchYahooQuote(rawTicker) {
       const meta = data?.chart?.result?.[0]?.meta;
 
       if (meta && typeof meta.regularMarketPrice === 'number' && meta.regularMarketPrice > 0) {
+        const isCad = symbol.endsWith('.TO') || symbol.endsWith('.V') || symbol.endsWith('.CN') || meta.currency === 'CAD';
         const quote = {
           symbol: meta.symbol || symbol,
           requestedTicker: clean,
           price: Number(meta.regularMarketPrice.toFixed(2)),
-          currency: meta.currency || (symbol.endsWith('.TO') ? 'CAD' : 'USD'),
+          currency: isCad ? 'CAD' : (meta.currency || 'USD'),
+          market: isCad ? 'CAD' : 'US',
           previousClose: typeof meta.chartPreviousClose === 'number' ? Number(meta.chartPreviousClose.toFixed(2)) : null,
           timestamp: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
           source: 'yahoo',
@@ -107,6 +122,7 @@ async function fetchYahooQuote(rawTicker) {
   // If Yahoo fails and ticker is US, try Finnhub fallback
   const finnhubQuote = await fetchFinnhubFallback(clean);
   if (finnhubQuote) {
+    finnhubQuote.market = 'US';
     memoryCache.set(clean, { data: finnhubQuote, cachedAt: Date.now() });
     return finnhubQuote;
   }
@@ -140,7 +156,7 @@ export default async function handler(req, res) {
     new Set(rawList.map((t) => t.trim().toUpperCase()).filter(Boolean))
   )
     .sort()
-    .slice(0, 10); // Capped at 10 to protect resources
+    .slice(0, 50); // Capped at 50 to cover full episode with 3 top picks + 20 caller mentions
 
   try {
     // 2. Error Boundaries with Promise.allSettled: Ensures single delisted ticker doesn't fail the batch
@@ -154,7 +170,12 @@ export default async function handler(req, res) {
       const outcome = settledResults[i];
 
       if (outcome.status === 'fulfilled' && outcome.value) {
-        quotes[t] = outcome.value;
+        const val = outcome.value;
+        quotes[t] = val;
+        // Also cross-index with stripped .TO or added .TO for instant cache hits
+        const base = t.replace(/\.(TO|TSX)$/i, '');
+        if (!quotes[base]) quotes[base] = val;
+        if (val.symbol && !quotes[val.symbol]) quotes[val.symbol] = val;
       } else {
         quotes[t] = { requestedTicker: t, price: null, error: 'Price unavailable' };
       }

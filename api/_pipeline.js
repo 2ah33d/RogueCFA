@@ -1265,6 +1265,7 @@ OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
     {
       "ticker": "TICKER",
       "company": "Company Name",
+      "country": "CAD" | "US",
       "reasoning": "80-150 words condensing the guest's own logic for this official top pick — WHY they like it, any stated price target or timeframe, any specific catalyst or metric they referenced.",
       "stance": "buy"
     }
@@ -1273,6 +1274,7 @@ OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
     {
       "ticker": "TICKER",
       "company": "Company Name",
+      "country": "CAD" | "US",
       "reasoning": "60-120 words condensing what the guest said about this stock when answering a caller question (buy/sell/hold stance, technicals/fundamentals, risks or valuation concerns).",
       "stance": "buy" | "sell" | "hold" | "unsure"
     }
@@ -1281,6 +1283,7 @@ OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
     {
       "ticker": "TICKER",
       "company": "Company Name",
+      "country": "CAD" | "US",
       "reasoning": "40-80 words summarizing the past pick evaluation, performance since prior pick date, and current posture (held/exited).",
       "stance": "buy" | "sell" | "hold" | "unsure"
     }

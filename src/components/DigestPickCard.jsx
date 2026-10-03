@@ -2,6 +2,8 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { detectStockMarket } from '../lib/priceFetcher';
+
 /**
  * Render a color-coded stance flag badge based on analyst evaluation
  * green flag if buy
@@ -56,6 +58,26 @@ function renderStanceFlag(stance) {
   return null;
 }
 
+/**
+ * Render subtle country / market badge to differentiate TSX (CAD) vs US (USD)
+ */
+function renderMarketBadge(market) {
+  if (!market) return null;
+  const isCad = market === 'CAD';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${
+        isCad
+          ? 'bg-rose-500/10 text-rose-300 border-rose-500/25'
+          : 'bg-sky-500/10 text-sky-300 border-sky-500/25'
+      }`}
+      title={isCad ? 'Canadian TSX Listing (CAD)' : 'US Listing (USD)'}
+    >
+      <span>{isCad ? '🇨🇦 TSX' : '🇺🇸 US'}</span>
+    </span>
+  );
+}
+
 export default function DigestPickCard({
   ticker,
   company,
@@ -66,12 +88,15 @@ export default function DigestPickCard({
   isCallerMention = false,
   stance = null,
   priceFormatted = null,
+  market = null,
+  quote = null,
 }) {
   const [expanded, setExpanded] = useState(false);
   const cardRef = useRef(null);
   const layoutKey = `pick-card-${ticker}-${index}`;
 
   const effectiveStance = stance || (isCallerMention ? null : 'buy');
+  const detectedMarket = market || detectStockMarket(ticker, company, reasoning, quote);
 
   const preview = reasoning
     ? reasoning.length > 100
@@ -114,13 +139,13 @@ export default function DigestPickCard({
 
   return (
     <>
-      {/* Collapsed card — morph origin */}
+      {/* Collapsed card — morph origin with symmetrical right-aligned price */}
       {!expanded ? (
         <motion.div
           ref={cardRef}
           layoutId={layoutKey}
           transition={{ type: 'spring', stiffness: 260, damping: 26 }}
-          whileHover={{ scale: 1.01, y: -2 }}
+          whileHover={{ scale: 1.008, y: -1 }}
           whileTap={{ scale: 0.99 }}
           className="bg-surface-card rounded-2xl overflow-hidden shadow-antigravity font-sans cursor-pointer group"
           onClick={handleOpen}
@@ -128,47 +153,53 @@ export default function DigestPickCard({
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpen(); } }}
         >
-          <div className="w-full text-left px-5 py-5 flex items-start gap-4">
-            {/* Ticker badge & live price */}
-            <div className="flex-shrink-0 mt-0.5 flex flex-col items-start gap-1">
-              <span className="inline-flex items-center font-bold text-sm text-prime bg-surface-elevated px-4 py-1.5 rounded-full">
+          <div className="w-full text-left px-5 py-4 sm:py-5 flex items-start gap-3.5 sm:gap-4">
+            {/* Ticker badge — clean, uniform single pill */}
+            <div className="flex-shrink-0 mt-0.5">
+              <span className="inline-flex items-center font-bold text-sm text-prime bg-surface-elevated px-3.5 py-1.5 rounded-full">
                 {ticker}
               </span>
-              {priceFormatted && (
-                <span className="text-[11px] font-semibold text-dim/90 tabular-nums px-2 py-0.5 bg-surface rounded-md border border-edge/30">
-                  {priceFormatted}
-                </span>
-              )}
             </div>
 
-            {/* Content */}
+            {/* Content & Right-Aligned Price */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                <h4 className="text-base font-medium text-prime truncate">
-                  {company || ticker}
-                </h4>
-                {renderStanceFlag(effectiveStance)}
-                {isCallerMention && (
-                  <span className="text-[10px] font-normal px-2.5 py-0.5 rounded-full bg-surface-elevated text-dim">
-                    Caller Q&amp;A
-                  </span>
-                )}
+              {/* Header row: Company & badges on left, live price & chevron on right */}
+              <div className="flex items-center justify-between gap-3 mb-1.5">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <h4 className="text-base font-semibold text-prime truncate">
+                    {company || ticker}
+                  </h4>
+                  {renderStanceFlag(effectiveStance)}
+                  {renderMarketBadge(detectedMarket)}
+                  {isCallerMention && (
+                    <span className="text-[10px] font-normal px-2.5 py-0.5 rounded-full bg-surface-elevated text-dim">
+                      Caller Q&amp;A
+                    </span>
+                  )}
+                </div>
+
+                {/* Right-aligned Live Price & Expand Chevron */}
+                <div className="flex items-center gap-2.5 shrink-0">
+                  {priceFormatted ? (
+                    <span className="text-sm font-bold text-prime tabular-nums tracking-tight">
+                      {priceFormatted}
+                    </span>
+                  ) : null}
+                  <svg
+                    className="w-5 h-5 text-dim/70 group-hover:text-prime transition-transform group-hover:translate-y-0.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
               </div>
+
+              {/* Reasoning Preview */}
               <p className="text-sm text-dim leading-relaxed line-clamp-2">
                 {preview}
               </p>
-            </div>
-
-            {/* Expand icon */}
-            <div className="flex-shrink-0 mt-1.5">
-              <svg
-                className="w-5 h-5 text-dim group-hover:text-prime transition-colors"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
-              </svg>
             </div>
           </div>
         </motion.div>
@@ -182,7 +213,7 @@ export default function DigestPickCard({
         <AnimatePresence>
           {expanded && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
-              {/* Toned down soft backdrop: subtle 55% opacity & light 3px blur */}
+              {/* Toned down soft backdrop */}
               <motion.div
                 key="pick-backdrop"
                 initial={{ opacity: 0 }}
@@ -202,7 +233,7 @@ export default function DigestPickCard({
                 className="relative z-10 w-full max-w-2xl bg-surface-card rounded-2xl p-7 sm:p-9 shadow-antigravity-elevated overflow-hidden font-sans mx-auto"
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Header */}
+                {/* Header: Symmetrical Layout with Live Price on Right */}
                 <motion.div
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -210,23 +241,17 @@ export default function DigestPickCard({
                   transition={{ delay: 0.08, duration: 0.2 }}
                   className="flex items-start justify-between gap-4 mb-6"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="flex flex-col items-start gap-1 flex-shrink-0">
-                      <span className="inline-flex items-center font-bold text-base text-prime bg-surface-elevated px-4 py-1.5 rounded-full mt-0.5">
-                        {ticker}
-                      </span>
-                      {priceFormatted && (
-                        <span className="text-xs font-semibold text-dim/90 tabular-nums px-2.5 py-0.5 bg-surface rounded-md border border-edge/30">
-                          {priceFormatted}
-                        </span>
-                      )}
-                    </div>
-                    <div>
+                  <div className="flex items-start gap-3 min-w-0">
+                    <span className="inline-flex items-center font-bold text-base text-prime bg-surface-elevated px-4 py-1.5 rounded-full mt-0.5 shrink-0">
+                      {ticker}
+                    </span>
+                    <div className="min-w-0">
                       <h3 className="text-xl font-bold text-prime leading-snug">
                         {company || ticker}
                       </h3>
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                         {renderStanceFlag(effectiveStance)}
+                        {renderMarketBadge(detectedMarket)}
                         {isCallerMention && (
                           <span className="text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-surface-elevated text-dim inline-block">
                             Caller Q&amp;A
@@ -236,16 +261,27 @@ export default function DigestPickCard({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleClose}
-                    className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full text-dim hover:text-prime hover:bg-surface-elevated transition-colors"
-                    aria-label="Close"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                  {/* Right Header Controls: Live Quote & Close Button */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    {priceFormatted && (
+                      <div className="text-right bg-surface-elevated/70 px-3.5 py-1.5 rounded-xl border border-edge/30">
+                        <span className="text-[10px] text-dim block uppercase tracking-wider font-semibold">Live Quote</span>
+                        <span className="text-base font-bold text-prime tabular-nums">
+                          {priceFormatted}
+                        </span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleClose}
+                      className="w-8 h-8 flex items-center justify-center rounded-full text-dim hover:text-prime hover:bg-surface-elevated transition-colors"
+                      aria-label="Close"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
                 </motion.div>
 
                 {/* High Readability Reasoning Text (text-base, text-prime) */}

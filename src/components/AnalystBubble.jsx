@@ -4,7 +4,7 @@ import { getCachedAnalystRecord, saveCachedAnalystRecord } from '../lib/guestTra
 /**
  * Circular score ring component matching main scoring engine aesthetic.
  */
-function ScoreCircle({ score, loading }) {
+export function ScoreCircle({ score, loading, label = 'Hit Rate' }) {
   const RADIUS = 18;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
@@ -12,7 +12,7 @@ function ScoreCircle({ score, loading }) {
     return (
       <div className="flex flex-col items-center justify-center shrink-0">
         <div className="w-12 h-12 rounded-full border-2 border-surface-elevated border-t-dim animate-spin" />
-        <span className="text-[10px] font-semibold text-dim/70 tracking-wider uppercase mt-1">Hit Rate</span>
+        <span className="text-[10px] font-semibold text-dim/70 tracking-wider uppercase mt-1">{label}</span>
       </div>
     );
   }
@@ -61,7 +61,7 @@ function ScoreCircle({ score, loading }) {
         </span>
       </div>
       <span className="text-[10px] font-semibold text-dim/80 tracking-wider uppercase mt-1">
-        Hit Rate
+        {label}
       </span>
     </div>
   );
