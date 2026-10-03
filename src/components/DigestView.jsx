@@ -6,6 +6,7 @@ import AnalystBubble from './AnalystBubble';
 import DigestPickCard from './DigestPickCard';
 import HistoryBrowser from './HistoryBrowser';
 import GoldenGoosePanel from './GoldenGoosePanel';
+import { useBatchLivePrices } from '../lib/priceFetcher';
 
 /**
  * Format the entire AI output into markdown text for clipboard copying,
@@ -117,6 +118,31 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
 
   const [copied, setCopied] = useState(false);
   const [isCheckingVideo, setIsCheckingVideo] = useState(false);
+
+  /* Single Batch Price Polling: Aggregate all tickers across this digest */
+  const allDigestTickers = useMemo(() => {
+    if (!digest) return [];
+    const set = new Set();
+    const addItems = (arr) => {
+      if (Array.isArray(arr)) {
+        arr.forEach((item) => {
+          const t = item?.ticker || item?.symbol;
+          if (t && typeof t === 'string') set.add(t.trim().toUpperCase());
+        });
+      }
+    };
+    addItems(digest.picks);
+    addItems(digest.top_picks);
+    addItems(digest.callerMentions);
+    addItems(digest.caller_mentions);
+    addItems(digest.pastPicks);
+    addItems(digest.past_picks);
+    return Array.from(set);
+  }, [digest]);
+
+  const { formatTickerPrice } = useBatchLivePrices(allDigestTickers, {
+    enabled: Boolean(digest && allDigestTickers.length > 0),
+  });
 
   /* Re-fetch latest history from DB with cache-buster */
   const handleRefreshHistory = useCallback(() => {
@@ -1303,6 +1329,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                     onScoreTicker={onScoreTicker}
                     index={idx}
                     stance={pick.stance || 'buy'}
+                    priceFormatted={formatTickerPrice(pick.ticker)}
                   />
                 ))}
               </div>
@@ -1330,6 +1357,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                     index={idx}
                     isCallerMention={true}
                     stance={pick.stance}
+                    priceFormatted={formatTickerPrice(pick.ticker)}
                   />
                 ))}
               </div>
@@ -1357,6 +1385,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                     index={idx}
                     isCallerMention={true}
                     stance={pick.action === 'exited_loss' || pick.action === 'exited_gain' ? 'sell' : 'hold'}
+                    priceFormatted={formatTickerPrice(pick.ticker)}
                   />
                 ))}
               </div>

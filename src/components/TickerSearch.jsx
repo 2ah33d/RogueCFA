@@ -237,8 +237,15 @@ export default function TickerSearch({ prefilledTicker = '', onSelectGuest }) {
       .then((data) => {
         if (isCancelled) return;
         if (data && Array.isArray(data.results)) {
-          setResults(data.results);
-          setTotalCount(data.total || 0);
+          const seen = new Set();
+          const uniqueResults = data.results.filter((m) => {
+            const sig = `${m.date}_${m.guest}_${m.segment}_${m.ticker}`;
+            if (seen.has(sig)) return false;
+            seen.add(sig);
+            return true;
+          });
+          setResults(uniqueResults);
+          setTotalCount(data.total || uniqueResults.length);
           setHasMore(Boolean(data.hasMore));
         } else {
           setResults([]);
@@ -282,7 +289,16 @@ export default function TickerSearch({ prefilledTicker = '', onSelectGuest }) {
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.results)) {
-          setResults((prev) => [...prev, ...data.results]);
+          setResults((prev) => {
+            const seen = new Set(prev.map((m) => `${m.date}_${m.guest}_${m.segment}_${m.ticker}`));
+            const fresh = data.results.filter((m) => {
+              const sig = `${m.date}_${m.guest}_${m.segment}_${m.ticker}`;
+              if (seen.has(sig)) return false;
+              seen.add(sig);
+              return true;
+            });
+            return [...prev, ...fresh];
+          });
           setOffset(nextOffset);
           setHasMore(Boolean(data.hasMore));
         }

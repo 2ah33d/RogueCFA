@@ -12,7 +12,7 @@ function ScoreCircle({ score, loading }) {
     return (
       <div className="flex flex-col items-center justify-center shrink-0">
         <div className="w-12 h-12 rounded-full border-2 border-surface-elevated border-t-dim animate-spin" />
-        <span className="text-[10px] font-semibold text-dim/70 tracking-wider uppercase mt-1">Credibility</span>
+        <span className="text-[10px] font-semibold text-dim/70 tracking-wider uppercase mt-1">Hit Rate</span>
       </div>
     );
   }
@@ -21,9 +21,9 @@ function ScoreCircle({ score, loading }) {
   const strokeOffset = CIRCUMFERENCE - (clamped / 100) * CIRCUMFERENCE;
 
   let colorClass = 'stroke-signal-buy text-signal-buy';
-  if (score < 65) {
+  if (score < 50) {
     colorClass = 'stroke-signal-avoid text-signal-avoid';
-  } else if (score < 80) {
+  } else if (score < 65) {
     colorClass = 'stroke-signal-watch text-signal-watch';
   }
 
@@ -57,11 +57,11 @@ function ScoreCircle({ score, loading }) {
         </svg>
         {/* Score number inside circle */}
         <span className="absolute font-sans font-bold text-xs text-prime">
-          {score != null ? clamped : '--'}
+          {score != null ? `${clamped}%` : '--'}
         </span>
       </div>
       <span className="text-[10px] font-semibold text-dim/80 tracking-wider uppercase mt-1">
-        Credibility
+        Hit Rate
       </span>
     </div>
   );

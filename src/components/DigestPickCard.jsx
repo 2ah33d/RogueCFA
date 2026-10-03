@@ -65,6 +65,7 @@ export default function DigestPickCard({
   index = 0,
   isCallerMention = false,
   stance = null,
+  priceFormatted = null,
 }) {
   const [expanded, setExpanded] = useState(false);
   const cardRef = useRef(null);
@@ -128,11 +129,16 @@ export default function DigestPickCard({
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpen(); } }}
         >
           <div className="w-full text-left px-5 py-5 flex items-start gap-4">
-            {/* Ticker badge */}
-            <div className="flex-shrink-0 mt-0.5">
+            {/* Ticker badge & live price */}
+            <div className="flex-shrink-0 mt-0.5 flex flex-col items-start gap-1">
               <span className="inline-flex items-center font-bold text-sm text-prime bg-surface-elevated px-4 py-1.5 rounded-full">
                 {ticker}
               </span>
+              {priceFormatted && (
+                <span className="text-[11px] font-semibold text-dim/90 tabular-nums px-2 py-0.5 bg-surface rounded-md border border-edge/30">
+                  {priceFormatted}
+                </span>
+              )}
             </div>
 
             {/* Content */}
@@ -205,9 +211,16 @@ export default function DigestPickCard({
                   className="flex items-start justify-between gap-4 mb-6"
                 >
                   <div className="flex items-start gap-3">
-                    <span className="inline-flex items-center font-bold text-base text-prime bg-surface-elevated px-4 py-1.5 rounded-full mt-0.5 flex-shrink-0">
-                      {ticker}
-                    </span>
+                    <div className="flex flex-col items-start gap-1 flex-shrink-0">
+                      <span className="inline-flex items-center font-bold text-base text-prime bg-surface-elevated px-4 py-1.5 rounded-full mt-0.5">
+                        {ticker}
+                      </span>
+                      {priceFormatted && (
+                        <span className="text-xs font-semibold text-dim/90 tabular-nums px-2.5 py-0.5 bg-surface rounded-md border border-edge/30">
+                          {priceFormatted}
+                        </span>
+                      )}
+                    </div>
                     <div>
                       <h3 className="text-xl font-bold text-prime leading-snug">
                         {company || ticker}

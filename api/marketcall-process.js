@@ -404,6 +404,17 @@ export default async function handler(req, res) {
     /* Non-blocking background pruning of old jobs older than 14 days */
     pruneStaleJobs(supabase, 14).catch(() => { });
 
+    /* Non-blocking background cleanup of older superseded rows for this exact date */
+    supabase
+      .from('digest_jobs')
+      .delete()
+      .eq('episode_date', selectedVideo.episodeDate || targetDateStr)
+      .neq('id', jobId)
+      .then(({ error: delErr }) => {
+        if (delErr) console.warn('[marketcall-process] Superseded row cleanup warning:', delErr.message);
+      })
+      .catch(() => { });
+
     /* ── Step 7: Track Record Processing (Passive & Cold-Start) ── */
     if (digest.guest) {
       /* Fire-and-forget background processing so digest response is never delayed */

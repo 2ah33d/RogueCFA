@@ -206,17 +206,29 @@ export default async function handler(req, res) {
       });
     }
 
-    /* Fetch all completed digest jobs from Supabase */
+    /* Fetch completed digest jobs from Supabase, latest created first */
     const { data: dbRows, error: dbError } = await supabase
       .from('digest_jobs')
-      .select('id, episode_date, video_id, video_title, result')
+      .select('id, episode_date, video_id, video_title, result, created_at')
       .eq('status', 'complete')
       .not('result', 'is', null)
-      .order('episode_date', { ascending: sort === 'oldest' });
+      .order('episode_date', { ascending: sort === 'oldest' })
+      .order('created_at', { ascending: false });
 
     if (dbError) {
       console.error('[ticker-search] Supabase query error:', dbError.message);
       return res.status(500).json({ error: `Database query failed: ${dbError.message}` });
+    }
+
+    /* Deduplicate completed rows by episode_date so renewed / rerun digests don't duplicate mentions */
+    const seenEpisodeDates = new Set();
+    const uniqueDbRows = [];
+    for (const row of dbRows || []) {
+      const dateKey = row.episode_date || row.result?.episodeDate || row.id;
+      if (!seenEpisodeDates.has(dateKey)) {
+        seenEpisodeDates.add(dateKey);
+        uniqueDbRows.push(row);
+      }
     }
 
     const cleanQ = q.toUpperCase();
@@ -234,8 +246,9 @@ export default async function handler(req, res) {
     const synonyms = Array.from(synonymSet);
 
     const allMentions = [];
+    const seenMentionSignatures = new Set();
 
-    for (const row of dbRows || []) {
+    for (const row of uniqueDbRows) {
       const digest = row.result?.digest;
       if (!digest) continue;
 
@@ -367,6 +380,11 @@ export default async function handler(req, res) {
             if (stanceFilter === 'hold' && !s.includes('hold') && !s.includes('neutral')) continue;
             if (stanceFilter === 'sell' && !s.includes('sell') && !s.includes('avoid')) continue;
           }
+
+          // Deduplicate mention signatures (date + guest + segment + ticker)
+          const mentionSig = `${m.date}_${m.guest}_${m.segment}_${ticker}`;
+          if (seenMentionSignatures.has(mentionSig)) continue;
+          seenMentionSignatures.add(mentionSig);
 
           allMentions.push({
             id: m.mentionId,

@@ -156,18 +156,18 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
         {/* Stats Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-surface-elevated p-4 rounded-xl shadow-antigravity">
-            <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Total Picks</span>
+            <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Formal Top Picks</span>
             <span className="text-xl font-bold text-prime mt-0.5 block tabular-nums">{record.totalPicks || picksList.length}</span>
             <span className="text-[11px] text-dim">{record.uniquePositionsCount ? `${record.uniquePositionsCount} unique positions` : `${record.resolvedPicks || picksList.length} evaluated`}</span>
           </div>
 
           <div className="bg-surface-elevated p-4 rounded-xl shadow-antigravity">
-            <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Hit Rate</span>
+            <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Top Pick Hit Rate</span>
             {record.hitRate !== null ? (
               <>
                 <span
                   className={`text-xl font-bold mt-0.5 block tabular-nums ${
-                    record.hitRate >= 0.6 ? 'text-signal-buy' : record.hitRate <= 0.4 ? 'text-signal-avoid' : 'text-signal-watch'
+                    record.hitRate >= 0.5 ? 'text-signal-buy' : 'text-signal-avoid'
                   }`}
                 >
                   {(record.hitRate * 100).toFixed(0)}%
@@ -189,22 +189,24 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
               {(record.avgTotalReturn ?? record.avgReturn ?? 0) >= 0 ? '+' : ''}
               {record.avgTotalReturn ?? record.avgReturn ?? 0}%
             </span>
-            <span className="text-[11px] text-dim">1-Yr Total Return</span>
+            <span className="text-[11px] text-dim">Total Holding Return</span>
           </div>
 
           <div className="bg-surface-elevated p-4 rounded-xl shadow-antigravity">
-            <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Credibility Score</span>
-            {record.credibilityScore != null ? (
+            <span className="text-xs text-dim uppercase tracking-wider font-semibold block">Benchmark Alpha</span>
+            {record.avgAlpha != null ? (
               <>
-                <span className="text-xl font-bold text-prime mt-0.5 block tabular-nums">{record.credibilityScore}/100</span>
-                <span className="text-[11px] text-dim">Empirical Bayes (N_eff = {record.uniquePositionsCount || '—'})</span>
+                <span className={`text-xl font-bold mt-0.5 block tabular-nums ${record.avgAlpha >= 0 ? 'text-signal-buy' : 'text-signal-avoid'}`}>
+                  {record.avgAlpha >= 0 ? '+' : ''}{record.avgAlpha}%
+                </span>
+                <span className="text-[11px] text-dim">vs S&amp;P/TSX Composite</span>
               </>
             ) : hasEnoughData ? (
               <>
                 <span className="text-xl font-bold text-prime mt-0.5 block tabular-nums">
-                  {Math.round(record.hitRate * 100)}/100
+                  +0.0%
                 </span>
-                <span className="text-[11px] text-dim">CFA Standard</span>
+                <span className="text-[11px] text-dim">Baseline</span>
               </>
             ) : (
               <span className="text-xs font-normal text-dim italic mt-1 block">Sample &lt; 3</span>
@@ -215,63 +217,103 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
         {/* Picks Table */}
         <div>
           <h4 className="text-xs font-semibold text-dim uppercase tracking-wider mb-3 flex items-center justify-between">
-            <span>Tracked Pick History</span>
-            <span className="text-[11px] font-normal text-dim">{picksList.length} total mentions</span>
+            <span>Inspectable Pick Ledger (Formal Top Picks Only)</span>
+            <span className="text-[11px] font-normal text-dim">{picksList.length} formal picks</span>
           </h4>
 
           {picksList.length === 0 ? (
             <div className="p-8 text-center text-dim text-xs rounded-xl bg-surface-elevated">
-              No stock picks recorded for this analyst yet.
+              No formal stock picks recorded for this analyst yet.
             </div>
           ) : (
-            <div className="rounded-xl overflow-hidden overflow-x-auto shadow-antigravity bg-surface-elevated">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-surface text-dim uppercase tracking-wider text-[11px]">
-                    <th className="py-3 px-4 font-semibold">Ticker</th>
-                    <th className="py-3 px-4 font-semibold">Review Date</th>
-                    <th className="py-3 px-4 font-semibold">Then Price</th>
-                    <th className="py-3 px-4 font-semibold">Now Price</th>
-                    <th className="py-3 px-4 font-semibold text-right">Total Return</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-surface-card font-sans font-medium">
-                  {picksList.map((pick, idx) => {
-                    const ret = pick.totalReturnPct ?? pick.total_return_pct ?? pick.returnPct ?? pick.return_pct ?? pick.actualReturn;
-                    return (
-                      <tr key={`${pick.ticker}-${idx}`} className="hover:bg-surface-card transition-colors">
-                        <td className="py-3.5 px-4 font-bold text-prime">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (onSelectTicker) {
-                                onSelectTicker(pick.ticker, record.guestName);
-                                onClose();
-                              }
-                            }}
-                            className="hover:text-white underline decoration-dim transition-colors text-left font-semibold"
-                            title={`Click to score ${pick.ticker}`}
-                          >
-                            {pick.ticker}
-                          </button>
-                        </td>
-                        <td className="py-3.5 px-4 text-dim whitespace-nowrap tabular-nums">{pick.reviewDate || pick.review_date || pick.date || 'N/A'}</td>
-                        <td className="py-3.5 px-4 text-dim tabular-nums">{pick.thenPrice != null || pick.then_price != null ? `$${pick.thenPrice ?? pick.then_price}` : '—'}</td>
-                        <td className="py-3.5 px-4 text-dim tabular-nums">{pick.nowPrice != null || pick.now_price != null ? `$${pick.nowPrice ?? pick.now_price}` : '—'}</td>
-                        <td className="py-3.5 px-4 text-right font-bold tabular-nums">
-                          {ret != null ? (
-                            <span className={ret > 0 ? 'text-signal-buy' : ret < 0 ? 'text-signal-avoid' : 'text-prime'}>
-                              {ret >= 0 ? '+' : ''}{ret}%
-                            </span>
-                          ) : (
-                            <span className="text-dim font-normal">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="space-y-2">
+              <div className="rounded-xl overflow-hidden overflow-x-auto shadow-antigravity bg-surface-elevated">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-surface text-dim uppercase tracking-wider text-[11px]">
+                      <th className="py-3 px-4 font-semibold">Ticker</th>
+                      <th className="py-3 px-4 font-semibold">Air Date</th>
+                      <th className="py-3 px-4 font-semibold">Broadcast Price</th>
+                      <th className="py-3 px-4 font-semibold text-right">90-Day Return</th>
+                      <th className="py-3 px-4 font-semibold text-right">TSX Composite Benchmark Return</th>
+                      <th className="py-3 px-4 font-semibold text-right">Alpha</th>
+                      <th className="py-3 px-4 font-semibold text-center">Link to Source</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-card font-sans font-medium">
+                    {picksList.map((pick, idx) => {
+                      const ret = pick.totalReturnPct ?? pick.total_return_pct ?? pick.returnPct ?? pick.return_pct ?? pick.actualReturn;
+                      const benchRet = pick.benchmarkReturn ?? pick.benchmark_return;
+                      const alpha = pick.benchmarkAlpha ?? pick.benchmark_alpha;
+                      const sourceUrl = pick.sourceArticleUrl || pick.source_article_url;
+
+                      return (
+                        <tr key={`${pick.ticker}-${idx}`} className="hover:bg-surface-card transition-colors">
+                          <td className="py-3.5 px-4 font-bold text-prime">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onSelectTicker) {
+                                  onSelectTicker(pick.ticker, record.guestName);
+                                  onClose();
+                                }
+                              }}
+                              className="hover:text-white underline decoration-dim transition-colors text-left font-semibold"
+                              title={`Click to search ${pick.ticker}`}
+                            >
+                              {pick.ticker}
+                            </button>
+                          </td>
+                          <td className="py-3.5 px-4 text-dim whitespace-nowrap tabular-nums">{pick.reviewDate || pick.review_date || pick.date || 'N/A'}</td>
+                          <td className="py-3.5 px-4 text-dim tabular-nums">{pick.thenPrice != null || pick.then_price != null ? `$${pick.thenPrice ?? pick.then_price}` : '—'}</td>
+                          <td className="py-3.5 px-4 text-right font-bold tabular-nums">
+                            {ret != null ? (
+                              <span className={ret > 0 ? 'text-signal-buy' : ret < 0 ? 'text-signal-avoid' : 'text-prime'}>
+                                {ret >= 0 ? '+' : ''}{ret}%
+                              </span>
+                            ) : (
+                              <span className="text-dim font-normal">—</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right text-dim tabular-nums">
+                            {benchRet != null ? `${benchRet >= 0 ? '+' : ''}${benchRet}%` : '—'}
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-bold tabular-nums">
+                            {alpha != null ? (
+                              <span className={alpha > 0 ? 'text-signal-buy' : alpha < 0 ? 'text-signal-avoid' : 'text-prime'}>
+                                {alpha >= 0 ? '+' : ''}{alpha}%
+                              </span>
+                            ) : (
+                              <span className="text-dim font-normal">—</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            {sourceUrl ? (
+                              <a
+                                href={sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-accent hover:underline inline-flex items-center gap-1"
+                                title="View official BNN episode broadcast source"
+                              >
+                                <span>Official Source</span>
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                              </a>
+                            ) : (
+                              <span className="text-[11px] text-dim/60">BNN Broadcast</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-dim/80 italic leading-relaxed pt-1">
+                * Hit Rate = Percentage of formal on-air Top Picks that outperformed the S&amp;P/TSX Composite over a fixed 90-day holding period.
+              </p>
             </div>
           )}
         </div>

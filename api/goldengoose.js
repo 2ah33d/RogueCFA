@@ -17,18 +17,30 @@ export default async function handler(req, res) {
 
     const { data: dbRows, error: dbError } = await supabase
       .from('digest_jobs')
-      .select('id, episode_date, video_id, video_title, result')
+      .select('id, episode_date, video_id, video_title, result, created_at')
       .eq('status', 'complete')
       .gte('episode_date', cutoffDate)
-      .order('episode_date', { ascending: false });
+      .order('episode_date', { ascending: false })
+      .order('created_at', { ascending: false });
 
     if (dbError) {
       console.error('[goldengoose-api] Database query error:', dbError.message);
     }
 
-    const latestJob = (dbRows || [])[0];
+    // Deduplicate by episode_date so renewed/rerun digests don't duplicate candidate counts
+    const seenEpisodeDates = new Set();
+    const uniqueDbRows = [];
+    for (const row of dbRows || []) {
+      const dateKey = row.episode_date || row.result?.episodeDate || row.id;
+      if (!seenEpisodeDates.has(dateKey)) {
+        seenEpisodeDates.add(dateKey);
+        uniqueDbRows.push(row);
+      }
+    }
 
-    const episodes = (dbRows || []).map((row) => ({
+    const latestJob = uniqueDbRows[0];
+
+    const episodes = uniqueDbRows.map((row) => ({
       episodeDate: row.episode_date,
       videoId: row.video_id,
       videoTitle: row.video_title,

@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { buildShortlists } from '../lib/goldenGoose';
 import { getKeys, getProvider } from '../lib/storage';
+import { useBatchLivePrices } from '../lib/priceFetcher';
 
 /**
  * AnalystMentionPill — Subtle grey collapsible commentary pill
@@ -247,6 +248,24 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
 
   const rejectedTickers = llmResult?._rejectedTickers || [];
 
+  /* Batch Live Prices for all Golden Goose & Warning Sell tickers */
+  const gooseTickers = useMemo(() => {
+    const set = new Set();
+    goldenPicks.forEach((p) => {
+      const t = typeof p === 'string' ? p : p?.ticker;
+      if (t) set.add(t.trim().toUpperCase());
+    });
+    warningSells.forEach((s) => {
+      const t = typeof s === 'string' ? s : s?.ticker;
+      if (t) set.add(t.trim().toUpperCase());
+    });
+    return Array.from(set);
+  }, [goldenPicks, warningSells]);
+
+  const { formatTickerPrice } = useBatchLivePrices(gooseTickers, {
+    enabled: gooseTickers.length > 0,
+  });
+
   /* Create quick lookup map for candidate details, merging API shortlists with local candidates */
   const candidateMap = useMemo(() => {
     const map = new Map();
@@ -354,10 +373,15 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                     {/* Card Header: Ticker & Candidate Stats */}
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-lg font-extrabold text-prime group-hover:text-amber-400 transition-colors">
                             {ticker}
                           </span>
+                          {formatTickerPrice(ticker) && (
+                            <span className="px-2.5 py-0.5 text-xs font-semibold bg-surface-elevated text-prime/90 rounded-full tabular-nums border border-edge/30">
+                              {formatTickerPrice(ticker)}
+                            </span>
+                          )}
                           <span className="px-2 py-0.5 text-[9px] font-sans font-bold bg-amber-400/15 border border-amber-400/35 text-amber-300 rounded-md">
                             {isAiCurated ? 'AI CONVICTION' : 'SHORTLIST CANDIDATE'}
                           </span>
@@ -451,8 +475,13 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                   <div className="space-y-3.5">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-lg font-extrabold text-rose-300">{ticker}</span>
+                          {formatTickerPrice(ticker) && (
+                            <span className="px-2.5 py-0.5 text-xs font-semibold bg-surface-elevated text-rose-200/90 rounded-full tabular-nums border border-edge/30">
+                              {formatTickerPrice(ticker)}
+                            </span>
+                          )}
                           <span className="px-2 py-0.5 text-[9px] font-sans font-bold bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-md">
                             WARNING SELL
                           </span>

@@ -17,9 +17,9 @@ export default function Disclaimer({ className = '' }) {
                16.5c-.77.833.192 2.5 1.732 2.5z"
           />
         </svg>
-        <p className="text-xs text-dim text-center">
-          <strong className="text-prime font-medium">This is not financial advice.</strong>{' '}
-          AI-generated scorecards may contain errors. Verify independently before investing.
+        <p className="text-xs text-dim text-center max-w-4xl leading-relaxed">
+          <strong className="text-prime font-medium">Compliance Notice:</strong>{' '}
+          Market data is delayed and provided for research and educational purposes only. This platform is a technology tool that extracts and summarizes public commentary; it is not an investment advisor, broker, or financial analyst. Past pick performance is calculated against public benchmark indices and does not guarantee future results.
         </p>
       </div>
     </div>
