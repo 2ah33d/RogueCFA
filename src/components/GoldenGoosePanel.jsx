@@ -146,13 +146,13 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
       setLlmResult(savedGoose);
       setIsAiCurated(true);
     } else {
-      /* Candidate fallback: present deterministic shortlist candidates directly */
+      /* Candidate fallback: present deterministic shortlist candidates directly (capped at top 4) */
       setLlmResult({
-        goldenPicks: buyHoldCandidates.map((c) => ({
+        goldenPicks: buyHoldCandidates.slice(0, 4).map((c) => ({
           ticker: c.ticker,
-          rationale: `Surfaced from multi-analyst shortlist (${c.mentionCount} mentions across ${c.distinctGuestCount} distinct analysts with +${c.weightedScore} score).`,
+          rationale: `Surfaced from multi-analyst shortlist (${c.buyCount || c.mentionCount} buy mentions across ${c.distinctGuestCount} distinct analysts with +${c.weightedScore} score).`,
         })),
-        warningSells: sellCandidates.map((c) => ({
+        warningSells: sellCandidates.slice(0, 4).map((c) => ({
           ticker: c.ticker,
           rationale: `Surfaced from sell candidate shortlist (${c.mentionCount} sell mention, score ${c.weightedScore}).`,
         })),
@@ -193,11 +193,11 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
           } else {
             /* If AI filtered to 0, still preserve candidate shortlists so user sees actionable data */
             setLlmResult({
-              goldenPicks: buyHoldCandidates.map((c) => ({
+              goldenPicks: buyHoldCandidates.slice(0, 4).map((c) => ({
                 ticker: c.ticker,
-                rationale: `Candidate shortlist with +${c.weightedScore} score (${c.mentionCount} mentions across ${c.distinctGuestCount} analysts).`,
+                rationale: `Candidate shortlist with +${c.weightedScore} score (${c.buyCount || c.mentionCount} buy mentions across ${c.distinctGuestCount} analysts).`,
               })),
-              warningSells: sellCandidates.map((c) => ({
+              warningSells: sellCandidates.slice(0, 4).map((c) => ({
                 ticker: c.ticker,
                 rationale: `Candidate warning shortlist with score ${c.weightedScore}.`,
               })),
@@ -233,20 +233,22 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
   let warningSells = llmResult?.warningSells || [];
 
   if (goldenPicks.length === 0 && buyHoldCandidates.length > 0) {
-    goldenPicks = buyHoldCandidates.map((c) => ({
+    goldenPicks = buyHoldCandidates.slice(0, 4).map((c) => ({
       ticker: c.ticker,
-      rationale: `Multi-analyst convergence candidate (+${c.weightedScore} score, ${c.mentionCount} mentions across ${c.distinctGuestCount} analysts).`,
+      rationale: `Multi-analyst convergence candidate (+${c.weightedScore} score, ${c.buyCount || c.mentionCount} buy mentions across ${c.distinctGuestCount} analysts).`,
     }));
   }
 
   if (warningSells.length === 0 && sellCandidates.length > 0) {
-    warningSells = sellCandidates.map((c) => ({
+    warningSells = sellCandidates.slice(0, 4).map((c) => ({
       ticker: c.ticker,
       rationale: `Candidate warning sell (${c.mentionCount} analyst sell mention).`,
     }));
   }
 
   const rejectedTickers = llmResult?._rejectedTickers || [];
+  const displayGoldenPicks = goldenPicks.slice(0, 4);
+  const displayWarningSells = warningSells.slice(0, 4);
 
   /* Batch Live Prices for all Golden Goose & Warning Sell tickers */
   const gooseTickers = useMemo(() => {
@@ -286,9 +288,9 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
   }, [llmResult, buyHoldCandidates, sellCandidates]);
 
   return (
-    <div className="w-full max-w-4xl mx-auto my-8 space-y-6 font-sans">
+    <div className="w-full max-w-4xl mx-auto my-6 sm:my-8 space-y-4 sm:space-y-6 font-sans">
       {/* ── Header Bar ── */}
-      <div className="bg-gradient-to-r from-amber-950/30 via-surface-card to-surface-card border border-amber-500/25 rounded-2xl p-6 shadow-antigravity relative overflow-hidden">
+      <div className="bg-gradient-to-r from-amber-950/30 via-surface-card to-surface-card border border-amber-500/25 rounded-2xl p-4 sm:p-6 shadow-antigravity relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
@@ -301,11 +303,11 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
               </span>
             </div>
             <p className="text-xs text-dim">
-              Layer 1 deterministic shortlist ({buyHoldCandidates.length} buy/hold, {sellCandidates.length} sell) → Layer 2 AI conviction synthesis.
+              Layer 1 deterministic shortlist ({buyHoldCandidates.length} buy convergence, {sellCandidates.length} sell warnings) → Layer 2 AI conviction synthesis.
             </p>
           </div>
 
-          <div className="flex items-center gap-3 text-xs font-sans">
+          <div className="flex items-center gap-2 sm:gap-3 text-xs font-sans flex-wrap">
             <button
               type="button"
               onClick={() => handleGenerateLLMEyes(true)}
@@ -325,13 +327,13 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
             </button>
 
             <div className="px-3 py-1.5 bg-surface-elevated/60 border border-edge rounded-xl text-dim flex items-center gap-2">
-              <span className="text-amber-400 font-bold">+{goldenPicks.length}</span>
-              <span>Golden Pick{goldenPicks.length === 1 ? '' : 's'}</span>
+              <span className="text-amber-400 font-bold">+{displayGoldenPicks.length}</span>
+              <span>Golden Pick{displayGoldenPicks.length === 1 ? '' : 's'}</span>
             </div>
-            {warningSells.length > 0 && (
+            {displayWarningSells.length > 0 && (
               <div className="px-3 py-1.5 bg-rose-950/30 border border-rose-500/30 rounded-xl text-rose-400">
-                <span className="font-bold mr-1.5">{warningSells.length}</span>
-                <span>Warning Sell{warningSells.length === 1 ? '' : 's'}</span>
+                <span className="font-bold mr-1.5">{displayWarningSells.length}</span>
+                <span>Warning Sell{displayWarningSells.length === 1 ? '' : 's'}</span>
               </div>
             )}
           </div>
@@ -347,17 +349,17 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
       </div>
 
       {/* ── Golden Picks Section ── */}
-      {goldenPicks.length > 0 ? (
+      {displayGoldenPicks.length > 0 ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-amber-400/90 flex items-center gap-2">
               <span>🏆 {isAiCurated ? 'AI-Curated Golden Picks' : 'Multi-Analyst Shortlist Picks'}</span>
-              <span className="text-xs font-normal text-dim uppercase">({goldenPicks.length} Tickers)</span>
+              <span className="text-xs font-normal text-dim uppercase">({displayGoldenPicks.length} Tickers)</span>
             </h3>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {goldenPicks.map((pick, pIdx) => {
+            {displayGoldenPicks.map((pick, pIdx) => {
               const ticker = typeof pick === 'string' ? pick : (pick?.ticker || '');
               if (!ticker) return null;
               const rationale = typeof pick === 'string' ? 'Multi-analyst convergence candidate.' : (pick?.rationale || '');
@@ -367,18 +369,18 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
               return (
                 <div
                   key={ticker || pIdx}
-                  className="bg-surface-card border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-5 shadow-lg shadow-amber-950/10 transition-all group relative flex flex-col justify-between"
+                  className="bg-surface-card border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-4 sm:p-5 shadow-lg shadow-amber-950/10 transition-all group relative flex flex-col justify-between"
                 >
-                  <div className="space-y-3.5">
+                  <div className="space-y-3 sm:space-y-3.5">
                     {/* Card Header: Ticker & Candidate Stats */}
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-2.5 sm:gap-3">
                       <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-lg font-extrabold text-prime group-hover:text-amber-400 transition-colors">
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                          <span className="text-base sm:text-lg font-extrabold text-prime group-hover:text-amber-400 transition-colors">
                             {ticker}
                           </span>
                           {formatTickerPrice(ticker) && (
-                            <span className="px-2.5 py-0.5 text-xs font-semibold bg-surface-elevated text-prime/90 rounded-full tabular-nums border border-edge/30">
+                            <span className="px-2 py-0.5 text-[11px] sm:text-xs font-semibold bg-surface-elevated text-prime/90 rounded-full tabular-nums border border-edge/30">
                               {formatTickerPrice(ticker)}
                             </span>
                           )}
@@ -386,7 +388,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                             {isAiCurated ? 'AI CONVICTION' : 'SHORTLIST CANDIDATE'}
                           </span>
                         </div>
-                        <p className="text-xs text-dim line-clamp-1">{company}</p>
+                        <p className="text-xs text-dim line-clamp-1 mt-0.5">{company}</p>
                       </div>
 
                       {cand && (
@@ -453,15 +455,15 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
       )}
 
       {/* ── Warning Sells Section ── */}
-      {warningSells.length > 0 && (
+      {displayWarningSells.length > 0 && (
         <div className="space-y-3 pt-2">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-rose-400/90 flex items-center gap-2">
             <span>⚠️ Multi-Analyst Warning Sells</span>
-            <span className="text-xs font-normal text-dim">({warningSells.length})</span>
+            <span className="text-xs font-normal text-dim">({displayWarningSells.length})</span>
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {warningSells.map((sell, sIdx) => {
+            {displayWarningSells.map((sell, sIdx) => {
               const ticker = typeof sell === 'string' ? sell : (sell?.ticker || '');
               if (!ticker) return null;
               const rationale = typeof sell === 'string' ? 'Multi-analyst warning sell candidate.' : (sell?.rationale || '');
@@ -470,15 +472,15 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
               return (
                 <div
                   key={ticker || sIdx}
-                  className="bg-rose-950/15 border border-rose-500/30 rounded-2xl p-5 shadow-lg shadow-rose-950/10 flex flex-col justify-between"
+                  className="bg-rose-950/15 border border-rose-500/30 rounded-2xl p-4 sm:p-5 shadow-lg shadow-rose-950/10 flex flex-col justify-between"
                 >
-                  <div className="space-y-3.5">
-                    <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-3 sm:space-y-3.5">
+                    <div className="flex items-start justify-between gap-2.5 sm:gap-3">
                       <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-lg font-extrabold text-rose-300">{ticker}</span>
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                          <span className="text-base sm:text-lg font-extrabold text-rose-300">{ticker}</span>
                           {formatTickerPrice(ticker) && (
-                            <span className="px-2.5 py-0.5 text-xs font-semibold bg-surface-elevated text-rose-200/90 rounded-full tabular-nums border border-edge/30">
+                            <span className="px-2 py-0.5 text-[11px] sm:text-xs font-semibold bg-surface-elevated text-rose-200/90 rounded-full tabular-nums border border-edge/30">
                               {formatTickerPrice(ticker)}
                             </span>
                           )}
@@ -486,7 +488,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                             WARNING SELL
                           </span>
                         </div>
-                        <p className="text-xs text-dim line-clamp-1">{cand?.company || ticker}</p>
+                        <p className="text-xs text-dim line-clamp-1 mt-0.5">{cand?.company || ticker}</p>
                       </div>
                       {cand && (
                         <span className="text-xs font-bold text-rose-400">{cand.weightedScore} SCORE</span>
@@ -548,13 +550,14 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
         {showAllShortlists && (
           <div className="mt-3 bg-surface-card border border-edge rounded-2xl overflow-hidden shadow-inner space-y-4 p-4">
             <div>
-              <h4 className="text-xs font-semibold uppercase text-amber-400 mb-2">Buy/Hold Candidates (Min 2 Mentions)</h4>
+              <h4 className="text-xs font-semibold uppercase text-amber-400 mb-2">Buy Convergence Candidates (Multi-Analyst Buys, 0 Sells)</h4>
               <table className="w-full text-left text-xs">
                 <thead className="bg-surface-elevated border-b border-edge text-dim uppercase text-[10px]">
                   <tr>
                     <th className="py-2 px-3">Ticker</th>
                     <th className="py-2 px-3">Company</th>
                     <th className="py-2 px-3 text-center">Score</th>
+                    <th className="py-2 px-3 text-center">Buys</th>
                     <th className="py-2 px-3 text-center">Mentions</th>
                     <th className="py-2 px-3 text-center">Analysts</th>
                   </tr>
@@ -565,6 +568,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                       <td className="py-2 px-3 font-bold text-prime">{cand.ticker}</td>
                       <td className="py-2 px-3 text-dim truncate max-w-[160px]">{cand.company}</td>
                       <td className="py-2 px-3 text-center font-bold text-amber-400">+{cand.weightedScore}</td>
+                      <td className="py-2 px-3 text-center font-bold text-emerald-400">{cand.buyCount || 0}</td>
                       <td className="py-2 px-3 text-center text-dim">{cand.mentionCount}</td>
                       <td className="py-2 px-3 text-center text-dim">{cand.distinctGuestCount}</td>
                     </tr>

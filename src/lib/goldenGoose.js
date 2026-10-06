@@ -6,7 +6,7 @@
 
 export const STANCE_WEIGHT = {
   buy: 1.0,
-  hold: 0.3,
+  hold: 0.2,
   sell: -1.0,
 };
 
@@ -139,23 +139,48 @@ export function buildShortlists(episodes = [], windowDays = 7) {
       .map((key) => agg.mentions.find((m) => m.epKey === key))
       .filter(Boolean);
 
-    const buyHoldCount = deduped.filter((m) => m && (m.stance === 'buy' || m.stance === 'hold')).length;
-    const sellCount = deduped.filter((m) => m.stance === 'sell').length;
+    const buyCount = deduped.filter((m) => m && m.stance === 'buy').length;
+    const holdCount = deduped.filter((m) => m && m.stance === 'hold').length;
+    const sellCount = deduped.filter((m) => m && m.stance === 'sell').length;
+    const pickCount = deduped.filter((m) => m && m.mentionType === 'pick').length;
+    const distinctBuyGuests = new Set(deduped.filter((m) => m && m.stance === 'buy').map((m) => m.guest)).size;
+    const distinctGuests = new Set(deduped.map((m) => m.guest)).size;
     const weightedTotal = deduped.reduce((sum, m) => sum + weightedScore(m), 0);
 
     const candidate = {
       ticker: agg.ticker,
       company: agg.company,
       mentionCount: deduped.length,
-      distinctGuestCount: new Set(deduped.map((m) => m.guest)).size,
+      distinctGuestCount: distinctGuests,
+      distinctBuyGuests,
+      buyCount,
+      holdCount,
+      sellCount,
+      pickCount,
       weightedScore: Math.round(weightedTotal * 10) / 10,
       mentions: deduped,
     };
 
-    if (buyHoldCount >= BUY_HOLD_MIN_MENTIONS) {
+    /* Golden Goose Buy Candidates:
+       1. MUST have at least 1 BUY recommendation (zero buys = strictly disqualified).
+       2. MUST NOT have active SELL recommendations (sellCount === 0). Dissenting/bearish calls disqualify bullish consensus.
+       3. MUST demonstrate true multi-analyst buy convergence:
+          - Multiple distinct analysts recommend BUY (distinctBuyGuests >= 2)
+          - OR Official Top Pick with confirming analyst coverage (pickCount >= 1 && distinctGuests >= 2)
+          - OR Repeated buy recommendations in rolling window (buyCount >= 2)
+    */
+    const isBullishConvergence =
+      buyCount >= 1 &&
+      sellCount === 0 &&
+      (distinctBuyGuests >= 2 || (pickCount >= 1 && distinctGuests >= 2) || buyCount >= 2);
+
+    if (isBullishConvergence) {
       buyHoldCandidates.push(candidate);
     }
 
+    /* Warning Sell Candidates:
+       Any stock with at least 1 sell / trim / avoid recommendation.
+    */
     if (sellCount >= 1) {
       sellCandidates.push(candidate);
     }
@@ -164,7 +189,7 @@ export function buildShortlists(episodes = [], windowDays = 7) {
   buyHoldCandidates.sort((a, b) => b.weightedScore - a.weightedScore);
   sellCandidates.sort((a, b) => a.weightedScore - b.weightedScore);
 
-  return { buyHoldCandidates, sellCandidates };
+  return { buyHoldCandidates, sellCandidates, buyCandidates: buyHoldCandidates };
 }
 
 /**
@@ -178,22 +203,23 @@ export function buildLLMEyesPrompt({ buyHoldCandidates, sellCandidates }, window
 
   const formatCandidate = (c) => `
 Ticker: ${c.ticker} (${c.company})
-Weighted Score: ${c.weightedScore} | ${c.mentionCount} mention(s) across ${c.distinctGuestCount} distinct analyst(s)
+Weighted Score: ${c.weightedScore} | ${c.mentionCount} mention(s) across ${c.distinctGuestCount} distinct analyst(s) (${c.buyCount || 0} Buy, ${c.holdCount || 0} Hold, ${c.sellCount || 0} Sell)
 Analyst Reasoning:
 ${c.mentions.map((m) => `  - [${m.mentionType.toUpperCase()}, ${m.stance.toUpperCase()}] ${m.guest} (${m.date}): "${m.reasoning}"`).join('\n')}`;
 
-  const prompt = `You are an elite CFA analyst evaluating stock tickers for RogueCFA's "Golden Goose" multi-analyst radar, synthesizing recent BNN Bloomberg MarketCall broadcasts from the past ${windowDays} days.
+  const prompt = `You are an elite financial analyst evaluating stock tickers for the "Golden Goose" multi-analyst radar, synthesizing recent BNN Bloomberg MarketCall broadcasts from the past ${windowDays} days.
 
 You may ONLY evaluate and output tickers from this exact candidate list: ${allowedTickers.join(', ')}.
 
-=== BUY/HOLD CANDIDATES (Multi-analyst convergence) ===
+=== BUY CONVERGENCE CANDIDATES (Multi-analyst bullish consensus) ===
 ${buyHoldCandidates.map(formatCandidate).join('\n---\n') || '(none this window)'}
 
 === SELL CANDIDATES (All analyst sell/trim mentions) ===
 ${sellCandidates.map(formatCandidate).join('\n---\n') || '(none this window)'}
 
 Your evaluation criteria:
-1. Golden Picks: Identify the strongest candidate tickers showing genuine fundamental, valuation, or structural tailwinds (e.g. accelerating growth, strong capital allocation, expanding margins, or secular industry momentum). If a candidate has multiple bullish mentions or high conviction from reputable analysts, select it.
+1. Golden Picks: Select top 3 to 4 candidate tickers showing the strongest fundamental, valuation, or structural tailwinds.
+   CRITICAL REQUIREMENT: Every Golden Pick MUST have genuine BUY conviction. NEVER select a stock with 0 buy ratings or conflicting sell ratings.
 2. Warning Sells: Highlight companies facing real structural headwinds, balance sheet concerns, debt issues, or broken technical trends cited by the analysts.
 3. For each selected ticker, write a concise 1-2 sentence conviction rationale summarizing why it was selected based on the analyst quotes provided.
 

@@ -87,14 +87,14 @@ export default async function handler(req, res) {
       : (process.env.ANTHROPIC_API_KEY || process.env.CRON_LLM_KEY || process.env.LLM_KEY);
 
     if (!apiKey) {
-      /* Fallback: Return candidate shortlists if no API key is available */
+      /* Fallback: Return top candidate shortlists if no API key is available (capped at 4) */
       return res.status(200).json({
         result: {
-          goldenPicks: buyHoldCandidates.map((c) => ({
+          goldenPicks: buyHoldCandidates.slice(0, 4).map((c) => ({
             ticker: c.ticker,
-            rationale: `Deterministic shortlist candidate with ${c.mentionCount} mention(s) across ${c.distinctGuestCount} analyst(s).`,
+            rationale: `Multi-analyst convergence candidate with ${c.buyCount || c.mentionCount} buy mention(s) across ${c.distinctGuestCount} analyst(s).`,
           })),
-          warningSells: sellCandidates.map((c) => ({
+          warningSells: sellCandidates.slice(0, 4).map((c) => ({
             ticker: c.ticker,
             rationale: `Deterministic sell candidate with ${c.mentionCount} sell mention(s).`,
           })),
