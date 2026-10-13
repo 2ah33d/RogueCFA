@@ -27,15 +27,35 @@ export default async function handler(req, res) {
       console.error('[goldengoose-api] Database query error:', dbError.message);
     }
 
-    // Deduplicate by episode_date so renewed/rerun digests don't duplicate candidate counts
+    // Deduplicate by episode_date so renewed/rerun digests don't duplicate candidate counts.
+    // Also ignore rows explicitly flagged as rebroadcasts / reruns or identical repeats of guest + picks fingerprint.
     const seenEpisodeDates = new Set();
+    const seenGuestPickFingerprints = new Set();
     const uniqueDbRows = [];
     for (const row of dbRows || []) {
-      const dateKey = row.episode_date || row.result?.episodeDate || row.id;
-      if (!seenEpisodeDates.has(dateKey)) {
-        seenEpisodeDates.add(dateKey);
-        uniqueDbRows.push(row);
+      if (row.result?.digest?.isRebroadcast || row.status === 'duplicate_rebroadcast') {
+        continue;
       }
+      const dateKey = row.episode_date || row.result?.episodeDate || row.id;
+      if (seenEpisodeDates.has(dateKey)) continue;
+      seenEpisodeDates.add(dateKey);
+
+      // Rebroadcast Fingerprint: Detect if the exact same analyst repeated the exact same top picks in window
+      const guest = (row.result?.digest?.guest || '').trim().toLowerCase();
+      const picks = (row.result?.digest?.picks || row.result?.digest?.top_picks || [])
+        .map((p) => (p.ticker || '').toUpperCase())
+        .sort()
+        .join(',');
+      const fingerprint = `${guest}:${picks}`;
+      if (guest && picks && seenGuestPickFingerprints.has(fingerprint)) {
+        console.log(`[goldengoose-api] Skipping syndicated rebroadcast for guest "${guest}" on ${dateKey}`);
+        continue;
+      }
+      if (guest && picks) {
+        seenGuestPickFingerprints.add(fingerprint);
+      }
+
+      uniqueDbRows.push(row);
     }
 
     const latestJob = uniqueDbRows[0];
@@ -90,10 +110,13 @@ export default async function handler(req, res) {
       /* Fallback: Return top candidate shortlists if no API key is available (capped at 4) */
       return res.status(200).json({
         result: {
-          goldenPicks: buyHoldCandidates.slice(0, 4).map((c) => ({
-            ticker: c.ticker,
-            rationale: `Multi-analyst convergence candidate with ${c.buyCount || c.mentionCount} buy mention(s) across ${c.distinctGuestCount} analyst(s).`,
-          })),
+          goldenPicks: buyHoldCandidates
+            .filter((c) => !c.isDefensiveOverlay)
+            .slice(0, 4)
+            .map((c) => ({
+              ticker: c.ticker,
+              rationale: `Multi-analyst convergence candidate with ${c.buyCount || c.mentionCount} buy mention(s) across ${c.distinctGuestCount} distinct ${c.distinctGuestCount === 1 ? 'analyst' : 'analysts'}.`,
+            })),
           warningSells: sellCandidates.slice(0, 4).map((c) => ({
             ticker: c.ticker,
             rationale: `Deterministic sell candidate with ${c.mentionCount} sell mention(s).`,

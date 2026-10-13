@@ -171,4 +171,52 @@ test('buildLLMEyesPrompt specifies buy conviction requirement and restricts allo
   assert.ok(prompt.includes('BUY CONVERGENCE CANDIDATES'), 'Prompt header reflects buy convergence');
   assert.ok(prompt.includes('Every Golden Pick MUST have genuine BUY conviction'), 'Prompt enforces buy requirement');
   assert.ok(prompt.includes('NEVER select a stock with 0 buy ratings or conflicting sell ratings'), 'Prompt forbids 0-buy / dissenting tickers');
+  assert.ok(prompt.includes('Risk-Reward & Execution Asymmetry'), 'Prompt requires risk-reward evaluation');
+});
+
+test('buildShortlists strictly rejects single-analyst repetition from multi-analyst shortlist', () => {
+  const episodes = [
+    {
+      episodeDate: '2026-10-12',
+      guest: 'Kim Bolton',
+      picks: [
+        { ticker: 'PLTR', company: 'Palantir', reasoning: 'AI ecosystem, 12-month target $192 vs $189 trading. High valuation warrants staged limit orders and covered calls.' },
+      ],
+    },
+    {
+      episodeDate: '2026-10-06',
+      guest: 'Kim Bolton',
+      picks: [
+        { ticker: 'PLTR', company: 'Palantir', reasoning: 'Simulation platforms and supply chain.' },
+      ],
+    },
+  ];
+
+  const { buyHoldCandidates } = buildShortlists(episodes, 14);
+  const pltr = buyHoldCandidates.find((c) => c.ticker === 'PLTR');
+  assert.equal(pltr, undefined, 'PLTR repeated only by a single analyst (Kim Bolton) must NOT qualify for multi-analyst shortlist');
+});
+
+test('buildShortlists flags defensive overlay when reasoning specifies covered calls or downside limit buffers', () => {
+  const episodes = [
+    {
+      episodeDate: '2026-10-08',
+      guest: 'Analyst A',
+      picks: [
+        { ticker: 'XYZ', company: 'XYZ Corp', reasoning: 'Valuation stretched, advise selling covered calls to manufacture yield.' },
+      ],
+    },
+    {
+      episodeDate: '2026-10-07',
+      guest: 'Analyst B',
+      callerMentions: [
+        { ticker: 'XYZ', company: 'XYZ Corp', stance: 'buy', reasoning: 'Solid core business.' },
+      ],
+    },
+  ];
+
+  const { buyHoldCandidates } = buildShortlists(episodes, 14);
+  const xyz = buyHoldCandidates.find((c) => c.ticker === 'XYZ');
+  assert.ok(xyz, 'XYZ qualifies via 2 distinct analysts');
+  assert.equal(xyz.isDefensiveOverlay, true, 'XYZ is flagged with isDefensiveOverlay');
 });

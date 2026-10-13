@@ -147,6 +147,11 @@ export function buildShortlists(episodes = [], windowDays = 7) {
     const distinctGuests = new Set(deduped.map((m) => m.guest)).size;
     const weightedTotal = deduped.reduce((sum, m) => sum + weightedScore(m), 0);
 
+    // Detect defensive yield / covered-call overlays or staged limit accumulator trades
+    const isDefensiveOverlay = deduped.some((m) =>
+      /\b(covered\s+calls?|sell\s+(?:short-dated\s+)?calls?|manufacture\s+yield|capped\s+upside|staged\s+limit|downside\s+buffer)\b/i.test(m.reasoning)
+    );
+
     const candidate = {
       ticker: agg.ticker,
       company: agg.company,
@@ -157,6 +162,7 @@ export function buildShortlists(episodes = [], windowDays = 7) {
       holdCount,
       sellCount,
       pickCount,
+      isDefensiveOverlay,
       weightedScore: Math.round(weightedTotal * 10) / 10,
       mentions: deduped,
     };
@@ -164,15 +170,18 @@ export function buildShortlists(episodes = [], windowDays = 7) {
     /* Golden Goose Buy Candidates:
        1. MUST have at least 1 BUY recommendation (zero buys = strictly disqualified).
        2. MUST NOT have active SELL recommendations (sellCount === 0). Dissenting/bearish calls disqualify bullish consensus.
-       3. MUST demonstrate true multi-analyst buy convergence:
+       3. STRICT MULTI-ANALYST REQUIREMENT:
+          - MUST demonstrate genuine multi-analyst buy convergence across at least 2 distinct analysts (distinctGuests >= 2).
           - Multiple distinct analysts recommend BUY (distinctBuyGuests >= 2)
-          - OR Official Top Pick with confirming analyst coverage (pickCount >= 1 && distinctGuests >= 2)
-          - OR Repeated buy recommendations in rolling window (buyCount >= 2)
+          - OR Official Top Pick with confirming analyst coverage (pickCount >= 1 && distinctGuests >= 2 && distinctBuyGuests >= 1).
+          - A single analyst repeating remarks across broadcasts (distinctGuests === 1) is a single-analyst reiteration,
+            NEVER multi-analyst convergence. Single-analyst repetition must NOT inflate conviction.
     */
     const isBullishConvergence =
       buyCount >= 1 &&
       sellCount === 0 &&
-      (distinctBuyGuests >= 2 || (pickCount >= 1 && distinctGuests >= 2) || buyCount >= 2);
+      distinctGuests >= 2 &&
+      (distinctBuyGuests >= 2 || (pickCount >= 1 && distinctGuests >= 2));
 
     if (isBullishConvergence) {
       buyHoldCandidates.push(candidate);
@@ -203,7 +212,7 @@ export function buildLLMEyesPrompt({ buyHoldCandidates, sellCandidates }, window
 
   const formatCandidate = (c) => `
 Ticker: ${c.ticker} (${c.company})
-Weighted Score: ${c.weightedScore} | ${c.mentionCount} mention(s) across ${c.distinctGuestCount} distinct analyst(s) (${c.buyCount || 0} Buy, ${c.holdCount || 0} Hold, ${c.sellCount || 0} Sell)
+Weighted Score: ${c.weightedScore} | ${c.mentionCount} mention(s) across ${c.distinctGuestCount} distinct analyst(s) (${c.buyCount || 0} Buy, ${c.holdCount || 0} Hold, ${c.sellCount || 0} Sell)${c.isDefensiveOverlay ? ' [DEFENSIVE OVERLAY DETECTED]' : ''}
 Analyst Reasoning:
 ${c.mentions.map((m) => `  - [${m.mentionType.toUpperCase()}, ${m.stance.toUpperCase()}] ${m.guest} (${m.date}): "${m.reasoning}"`).join('\n')}`;
 
@@ -222,6 +231,10 @@ Your evaluation criteria:
    CRITICAL REQUIREMENT: Every Golden Pick MUST have genuine BUY conviction. NEVER select a stock with 0 buy ratings or conflicting sell ratings.
 2. Warning Sells: Highlight companies facing real structural headwinds, balance sheet concerns, debt issues, or broken technical trends cited by the analysts.
 3. For each selected ticker, write a concise 1-2 sentence conviction rationale summarizing why it was selected based on the analyst quotes provided.
+4. Risk-Reward & Execution Asymmetry:
+   - Carefully evaluate the price delta against any stated analyst price target and execution structure.
+   - REJECT any candidate where the analyst cites high valuation with minimal expected upside to target (<5%) or recommends defensive hedging overlays (e.g. staged limit buy orders down 10-15% as buffers, or selling short-dated covered calls to manufacture yield).
+   - Golden Picks MUST be genuine, unhedged directional long opportunities with attractive risk-reward. Do NOT surface defensive, capped-upside yield trades as high-conviction directional longs.
 
 Respond strictly in valid JSON format with NO surrounding markdown or extra text:
 {

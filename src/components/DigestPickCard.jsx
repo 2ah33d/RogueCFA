@@ -142,7 +142,7 @@ export default function DigestPickCard({
             <div className="flex-1 min-w-0">
               {/* Row 1: Company Title on left, Live Price & Chevron on right */}
               <div className="flex items-center justify-between gap-2.5">
-                <h4 className="text-sm sm:text-base font-semibold text-prime truncate">
+                <h4 className="text-base sm:text-[17px] font-semibold text-prime truncate">
                   {company || ticker}
                 </h4>
 
@@ -226,7 +226,7 @@ export default function DigestPickCard({
                       {ticker}
                     </span>
                     <div className="min-w-0">
-                      <h3 className="text-base sm:text-xl font-bold text-prime leading-snug">
+                      <h3 className="text-lg sm:text-xl font-bold text-prime leading-snug">
                         {company || ticker}
                       </h3>
                       <div className="flex items-center gap-1.5 sm:gap-2 mt-1 sm:mt-1.5 flex-wrap">

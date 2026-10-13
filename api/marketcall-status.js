@@ -54,8 +54,9 @@ export default async function handler(req, res) {
       response.result = data.result;
     }
 
-    if (data.status === 'error' && data.error_message) {
+    if ((data.status === 'error' || data.status === 'date_mismatch') && data.error_message) {
       response.error = data.error_message;
+      response.status = data.status;
       response.videoId = data.video_id;
       response.videoTitle = data.video_title;
     }

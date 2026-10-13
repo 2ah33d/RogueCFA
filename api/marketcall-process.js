@@ -31,6 +31,8 @@ import {
   sanitizeDigestResult,
   pruneStaleJobs,
   fetchBnnTopPicksAnalyst,
+  detectBroadcastDateMismatch,
+  isCanadianMarketHoliday,
 } from './_pipeline.js';
 
 export const config = { maxDuration: 300 };
@@ -318,6 +320,35 @@ export default async function handler(req, res) {
       return res.status(200).json({ jobId, status: 'error', error: errorMsg });
     }
 
+    /* ── Broadcast Date Verification Guard ── */
+    const mismatchCheck = detectBroadcastDateMismatch(targetDateStr, {
+      transcript: cleanedTranscript,
+      title: selectedVideo.videoTitle,
+      description: selectedVideo.description,
+      rssDate: selectedVideo.episodeDate,
+    });
+
+    if (mismatchCheck.hasMismatch) {
+      const isHoliday = isCanadianMarketHoliday(targetDateStr);
+      const mismatchMsg = mismatchCheck.reason + (isHoliday ? ` Note: ${targetDateStr} is a Canadian market holiday (TSX closed; BNN aired syndicated rebroadcast).` : '');
+      console.warn(`[marketcall-process] ${mismatchMsg}`);
+
+      await updateJob(jobId, 'date_mismatch', {
+        status: 'date_mismatch',
+        detectedDate: mismatchCheck.detectedDate,
+        targetDate: targetDateStr,
+        reason: mismatchMsg,
+      }, mismatchMsg, selectedVideo.videoId, selectedVideo.videoTitle);
+
+      return res.status(200).json({
+        jobId,
+        status: 'date_mismatch',
+        error: mismatchMsg,
+        detectedDate: mismatchCheck.detectedDate,
+        targetDate: targetDateStr,
+      });
+    }
+
     /* ── Step 6: Build prompt & call LLM ── */
     const { systemPrompt, userPrompt } = buildDigestPrompt(
       cleanedTranscript,
@@ -352,7 +383,8 @@ export default async function handler(req, res) {
         selectedVideo.videoTitle,
         selectedVideo.description,
         bnnArticleGuest,
-        targetDateStr
+        targetDateStr,
+        digest.firm || ''
       );
       digest.guest = resolved.name;
       digest.nameConfidence = resolved.confidence;
@@ -365,12 +397,16 @@ export default async function handler(req, res) {
       }
     }
 
-    /* Check for Consecutive Day Double-Mention Anomaly */
+    /* Check for Rebroadcast or Consecutive Day Double-Mention Anomaly */
     try {
       const doubleCheck = await detectConsecutiveDayDouble(targetDateStr, digest, supabase);
       if (doubleCheck && doubleCheck.isDouble) {
         digest.isConsecutiveDouble = true;
         digest.doubleAnomaly = doubleCheck;
+        if (doubleCheck.isRebroadcast) {
+          digest.isRebroadcast = true;
+          digest.originalEpisodeDate = doubleCheck.originalDate;
+        }
         if (!Array.isArray(digest._warnings)) digest._warnings = [];
         if (!digest._warnings.includes(doubleCheck.warningMessage)) {
           digest._warnings.push(doubleCheck.warningMessage);
@@ -416,7 +452,8 @@ export default async function handler(req, res) {
       .catch(() => { });
 
     /* ── Step 7: Track Record Processing (Passive & Cold-Start) ── */
-    if (digest.guest) {
+    // Syndicated holiday rebroadcasts must never duplicate picks in analyst_track_record
+    if (digest.guest && !digest.isRebroadcast) {
       /* Fire-and-forget background processing so digest response is never delayed */
       (async () => {
         try {

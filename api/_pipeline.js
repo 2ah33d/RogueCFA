@@ -231,6 +231,112 @@ export function parseDateFromTitle(title) {
 }
 
 /**
+ * Extract broadcast date mentioned verbally by host in the transcript introduction.
+ * BNN Market Call hosts announce the show date at the top of the hour:
+ * e.g., "Welcome to Market Call for Tuesday, October 6th, 2026", "Today is October 6th".
+ */
+export function extractDateFromTranscript(transcriptText, referenceYear = null) {
+  if (!transcriptText || typeof transcriptText !== 'string') return null;
+
+  // Inspect the first 4,000 characters where host greeting occurs
+  const intro = transcriptText.slice(0, 4000);
+
+  const monthMap = {
+    january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
+    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
+    jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sept: '09', sep: '09', oct: '10', nov: '11', dec: '12',
+  };
+
+  const monthNames = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec';
+
+  // Pattern 1: Explicit month, day, and year (e.g. "October 6th, 2026", "October 6 2026")
+  const pWithYear = new RegExp(
+    `(?:welcome\\s+to\\s+market\\s+call|today\\s+is|it['’]s|broadcast(?:ing)?\\s+on|show\\s+for|on\\s+this|welcome\\s+back)?\\s*(?:monday|tuesday|wednesday|thursday|friday)?,?\\s*(${monthNames})\\.?\\s+(?:the\\s+)?([0-9]{1,2})(?:st|nd|rd|th)?,?\\s+([0-9]{4})`,
+    'i'
+  );
+  const m1 = intro.match(pWithYear);
+  if (m1) {
+    const mStr = m1[1].toLowerCase();
+    const month = monthMap[mStr] || '01';
+    const day = m1[2].padStart(2, '0');
+    const year = m1[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // Pattern 2: Contextual greeting without year (e.g. "Welcome to Market Call for Tuesday, October 6th", "Today is Tuesday, October 6th")
+  const pIntroNoYear = new RegExp(
+    `(?:welcome\\s+to\\s+market\\s+call(?:\\s+for|\\s+on)?|today\\s+is|it['’]s|on\\s+this|show\\s+for)\\s+(?:monday|tuesday|wednesday|thursday|friday)?,?\\s*(${monthNames})\\.?\\s+(?:the\\s+)?([0-9]{1,2})(?:st|nd|rd|th)?\\b`,
+    'i'
+  );
+  const m2 = intro.match(pIntroNoYear);
+  if (m2) {
+    const mStr = m2[1].toLowerCase();
+    const month = monthMap[mStr] || '01';
+    const day = m2[2].padStart(2, '0');
+    const year = referenceYear ? String(referenceYear) : String(new Date().getUTCFullYear());
+    return `${year}-${month}-${day}`;
+  }
+
+  // Pattern 3: Day first with month and year (e.g. "6th of October, 2026")
+  const pDayFirst = new RegExp(
+    `([0-9]{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNames})\\.?,?\\s+([0-9]{4})`,
+    'i'
+  );
+  const m3 = intro.match(pDayFirst);
+  if (m3) {
+    const day = m3[1].padStart(2, '0');
+    const mStr = m3[2].toLowerCase();
+    const month = monthMap[mStr] || '01';
+    const year = m3[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  return null;
+}
+
+/**
+ * Detects whether the source broadcast content date matches the requested generation date.
+ * If audio/transcript/title originates from a past day (e.g. Oct 6) while generation is requested
+ * for a new day (e.g. Oct 12 holiday rerun), flags hasMismatch: true to abort corrupting the ledger.
+ */
+export function detectBroadcastDateMismatch(targetDateStr, { transcript = '', title = '', description = '', rssDate = '' } = {}) {
+  if (!targetDateStr) return { hasMismatch: false, detectedDate: null, targetDate: targetDateStr };
+
+  const refYear = targetDateStr.split('-')[0];
+
+  const transcriptDate = extractDateFromTranscript(transcript, refYear);
+  const titleDate = parseDateFromTitle(title);
+  const descDate = parseDateFromTitle(description);
+  const cleanRssDate = rssDate && /^\d{4}-\d{2}-\d{2}$/.test(rssDate) ? rssDate : null;
+
+  const detectedDate = transcriptDate || titleDate || cleanRssDate || descDate;
+
+  if (detectedDate && detectedDate !== targetDateStr) {
+    const source = transcriptDate
+      ? 'verbal transcript intro'
+      : titleDate
+        ? 'video/podcast title'
+        : cleanRssDate
+          ? 'RSS publication date'
+          : 'description metadata';
+
+    return {
+      hasMismatch: true,
+      detectedDate,
+      targetDate: targetDateStr,
+      source,
+      reason: `Broadcast date mismatch detected: The source content is dated ${detectedDate} (via ${source}), which contradicts the requested generation date ${targetDateStr}. Refusing to stamp rerun broadcast as a live episode for ${targetDateStr}.`,
+    };
+  }
+
+  return {
+    hasMismatch: false,
+    detectedDate: detectedDate || targetDateStr,
+    targetDate: targetDateStr,
+  };
+}
+
+/**
  * Normalizes candidate video items and finds the best matching YouTube video for targetDateStr.
  * Strictly verifies that the video title or description explicitly contains targetDateStr.
  * Never matches prior-day videos or loose upload timestamps.
@@ -707,7 +813,254 @@ export const PHONETIC_ANALYST_OVERRIDES = {
   'julien nono': 'Julien Nono-Womdim',
   'julian klymochko': 'Julian Klymochko',
   'julien klymochko': 'Julian Klymochko',
+  'ryan madden': 'Brian Madden',
+  'brian madden': 'Brian Madden',
 };
+
+/**
+ * Computes Levenshtein distance between two strings (case-insensitive).
+ */
+export function levenshteinDistance(a, b) {
+  if (a === b) return 0;
+  if (!a) return b ? b.length : 0;
+  if (!b) return a.length;
+
+  const s1 = a.toLowerCase().trim();
+  const s2 = b.toLowerCase().trim();
+  if (s1 === s2) return 0;
+
+  const m = s1.length;
+  const n = s2.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,       // deletion
+        dp[i][j - 1] + 1,       // insertion
+        dp[i - 1][j - 1] + cost // substitution
+      );
+    }
+  }
+  return dp[m][n];
+}
+
+/**
+ * Normalized string similarity score [0.0 - 1.0].
+ */
+export function nameSimilarity(a, b) {
+  if (!a && !b) return 1.0;
+  if (!a || !b) return 0.0;
+  const dist = levenshteinDistance(a, b);
+  const maxLen = Math.max(a.trim().length, b.trim().length);
+  return maxLen === 0 ? 1.0 : 1 - dist / maxLen;
+}
+
+/**
+ * Canonical registry of recurring BNN Bloomberg Market Call analysts with known affiliations.
+ * Used for zero-cost in-memory fuzzy matching and disambiguation against audio speech mishearings.
+ */
+export const KNOWN_BNN_ANALYSTS = [
+  { name: 'Brian Madden', firm: 'First Avenue Investment Counsel', aliases: ['Ryan Madden', 'Bryan Madden'] },
+  { name: 'Kim Bolton', firm: 'Black Swan Dexteritas', aliases: ['Tim Bolton'] },
+  { name: 'Bruce Campbell', firm: 'StoneCastle Investment Management', aliases: ['Bruce Gamble'] },
+  { name: 'Christine Poole', firm: 'Create Value Wealth Management' },
+  { name: 'Greg Newman', firm: 'Scotia Wealth Management' },
+  { name: 'Stan Wong', firm: 'Scotia Wealth Management', aliases: ['Dan Wong'] },
+  { name: 'David Burrows', firm: 'Barometer Capital Management' },
+  { name: 'Ivana Delevska', firm: 'Spear Invest' },
+  { name: 'Larry Berman', firm: 'ETF Capital Management' },
+  { name: 'Julien Nono-Womdim', firm: 'TD Asset Management', aliases: ['Julien Nono-Wamden', 'Julian Nono-Wamden', 'Julian Nono'] },
+  { name: 'Julian Klymochko', firm: 'Accelerate Financial Technologies', aliases: ['Julien Klymochko'] },
+  { name: 'Andrew Pyle', firm: 'CIBC Wood Gundy' },
+  { name: 'Keith Richards', firm: 'ValueTrend Wealth Management' },
+  { name: 'Brooke Thackray', firm: 'Global X Investments' },
+  { name: 'Darren Sissons', firm: 'Campbell, Lee & Ross' },
+  { name: 'John Zechner', firm: 'J. Zechner Associates' },
+  { name: 'Jason Del Vicario', firm: 'Hillside Wealth Management' },
+  { name: 'Brian Acker', firm: 'Acker Finley' },
+  { name: 'Barry Schwartz', firm: 'Baskin Wealth Management' },
+  { name: 'Norman Levine', firm: 'Portfolio Management Corporation' },
+  { name: 'Colin Cieszynski', firm: 'SIA Wealth Management' },
+  { name: 'Martin Pelletier', firm: 'Wellington-Altus Private Counsel' },
+  { name: 'Cameron Hurst', firm: 'Equium Capital Management' },
+  { name: 'Ross Healy', firm: 'Strategic Analysis Corporation' },
+  { name: 'Rob Lauzon', firm: 'Middlefield Capital' },
+  { name: 'Peter Hodson', firm: '5i Research' },
+  { name: 'Allan Small', firm: 'iA Private Wealth' },
+  { name: 'David Driscoll', firm: 'Liberty International Investment Management' },
+  { name: 'Robert McWhirter', firm: 'Selective Asset Management' },
+  { name: 'Michael Sprung', firm: 'Sprung Investment Management' },
+  { name: 'Stephen Takacsy', firm: 'Lester Asset Management' },
+  { name: 'Bill Harris', firm: 'Avenue Investment Management' },
+  { name: 'Lorne Steinberg', firm: 'Steinberg Wealth Management' },
+  { name: 'John Stephenson', firm: 'Stephenson & Company Capital Management' },
+  { name: 'James Telfser', firm: 'Aventine Management Group' },
+  { name: 'David Baskin', firm: 'Baskin Wealth Management' },
+  { name: 'Kevin O\'Leary', firm: 'O\'Shares Investments' },
+  { name: 'Gord O\'Reilly', firm: 'Northland Wealth Management' },
+  { name: 'Paul Gardner', firm: 'Avenue Investment Management' },
+  { name: 'Benj Gallander', firm: 'Contra the Heard' },
+  { name: 'Hap Sneddon', firm: 'CastleMoore Investment Consulting' },
+  { name: 'Earl Davis', firm: 'BMO Global Asset Management' },
+  { name: 'Craig Basinger', firm: 'Purpose Investments' },
+  { name: 'Geoff Castle', firm: 'PenderFund Capital Management' },
+  { name: 'Michael O\'Brien', firm: 'TD Asset Management' },
+  { name: 'Les Stelmach', firm: 'Franklin Templeton' },
+  { name: 'Ryan Bushell', firm: 'Newhaven Asset Management' },
+];
+
+/**
+ * Automated Database & Phonetic Analyst Disambiguation Engine.
+ * Dynamically resolves speech-to-text audio mishearings (e.g. "Ryan Madden" -> "Brian Madden",
+ * "Tim Bolton" -> "Kim Bolton", "Dan Wong" -> "Stan Wong") by matching against known BNN analysts.
+ * 
+ * Hierarchy:
+ * 1. Explicit override alias dictionary
+ * 2. Exact match (case-insensitive)
+ * 3. Exact last name match + first name edit distance <= 1
+ * 4. Firm name corroboration
+ * 5. Full name Levenshtein distance <= 2 (minimum 8 chars)
+ */
+export function matchKnownAnalyst(heardName, heardFirm = '', extraDbAnalysts = []) {
+  if (!heardName || typeof heardName !== 'string') {
+    return { matched: false, name: heardName || '', confidence: 'unknown', distance: null };
+  }
+
+  const cleaned = heardName.trim();
+  const lower = cleaned.toLowerCase();
+
+  // 1. Explicit phonetic override check (backward compatibility)
+  if (PHONETIC_ANALYST_OVERRIDES[lower]) {
+    return {
+      matched: true,
+      name: PHONETIC_ANALYST_OVERRIDES[lower],
+      confidence: 'phonetic_override',
+      distance: 0,
+      matchType: 'explicit_override',
+    };
+  }
+
+  // Combine canonical directory with extra database analysts if provided
+  const pool = [...KNOWN_BNN_ANALYSTS];
+  if (Array.isArray(extraDbAnalysts)) {
+    for (const extra of extraDbAnalysts) {
+      const name = typeof extra === 'string' ? extra : extra?.name;
+      const firm = typeof extra === 'object' ? extra?.firm : '';
+      if (name && !pool.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+        pool.push({ name, firm, aliases: [] });
+      }
+    }
+  }
+
+  // 2. Exact match
+  const exact = pool.find((a) => a.name.toLowerCase() === lower);
+  if (exact) {
+    return {
+      matched: true,
+      name: exact.name,
+      confidence: 'exact_database_match',
+      distance: 0,
+      firm: exact.firm,
+    };
+  }
+
+  // 3. Known aliases check
+  for (const analyst of pool) {
+    if (analyst.aliases && analyst.aliases.some((alias) => alias.toLowerCase() === lower)) {
+      return {
+        matched: true,
+        name: analyst.name,
+        confidence: 'database_fuzzy_match',
+        distance: 1,
+        matchType: 'known_alias',
+        firm: analyst.firm,
+      };
+    }
+  }
+
+  // Tokenize heard name
+  const heardTokens = cleaned.split(/\s+/).filter(Boolean);
+  const heardFirst = heardTokens[0] || '';
+  const heardLast = heardTokens.slice(1).join(' ') || '';
+
+  let bestMatch = null;
+  let minDistance = 999;
+
+  for (const analyst of pool) {
+    const candidateName = analyst.name;
+    const candTokens = candidateName.split(/\s+/).filter(Boolean);
+    const candFirst = candTokens[0] || '';
+    const candLast = candTokens.slice(1).join(' ') || '';
+
+    const fullDist = levenshteinDistance(cleaned, candidateName);
+
+    // Rule A: Last name exact match + first name edit distance <= 1
+    // (e.g., "Ryan Madden" vs "Brian Madden", "Tim Bolton" vs "Kim Bolton", "Dan Wong" vs "Stan Wong")
+    const lastMatches = heardLast.toLowerCase() === candLast.toLowerCase() && heardLast.length >= 3;
+    const firstDist = levenshteinDistance(heardFirst, candFirst);
+
+    if (lastMatches && firstDist <= 2) {
+      return {
+        matched: true,
+        name: candidateName,
+        confidence: 'database_fuzzy_match',
+        distance: firstDist,
+        matchType: 'last_name_and_phonetic_first',
+        firm: analyst.firm,
+      };
+    }
+
+    // Rule B: Firm name corroboration
+    if (heardFirm && analyst.firm) {
+      const hFirmLower = heardFirm.toLowerCase();
+      const aFirmLower = analyst.firm.toLowerCase();
+      const firmMatches = hFirmLower.includes(aFirmLower) || aFirmLower.includes(hFirmLower) ||
+        (hFirmLower.includes('first avenue') && aFirmLower.includes('first avenue')) ||
+        (hFirmLower.includes('black swan') && aFirmLower.includes('black swan')) ||
+        (hFirmLower.includes('stonecastle') && aFirmLower.includes('stonecastle'));
+
+      if (firmMatches && (lastMatches || firstDist <= 2 || fullDist <= 3)) {
+        return {
+          matched: true,
+          name: candidateName,
+          confidence: 'database_fuzzy_match',
+          distance: fullDist,
+          matchType: 'firm_corroborated_match',
+          firm: analyst.firm,
+        };
+      }
+    }
+
+    // Rule C: Full name edit distance <= 2 for names of sufficient length (length >= 8)
+    if (cleaned.length >= 8 && fullDist <= 2 && fullDist < minDistance) {
+      minDistance = fullDist;
+      bestMatch = {
+        matched: true,
+        name: candidateName,
+        confidence: 'database_fuzzy_match',
+        distance: fullDist,
+        matchType: 'levenshtein_distance',
+        firm: analyst.firm,
+      };
+    }
+  }
+
+  if (bestMatch) {
+    return bestMatch;
+  }
+
+  return {
+    matched: false,
+    name: cleaned,
+    confidence: 'audio_only',
+    distance: minDistance < 999 ? minDistance : null,
+  };
+}
 
 /**
  * Extracts official guest analyst name directly from YouTube video title & description.
@@ -821,6 +1174,45 @@ export async function fetchBnnTopPicksAnalyst(targetDate) {
     return false;
   }
 
+  /* Attempt 0: Official BNN Bloomberg Podcast RSS Feed (100% authoritative schedule & verified names) */
+  try {
+    const rssUrl = 'https://www.omnycontent.com/d/playlist/4809bc8a-e41a-405c-93da-a8cf011df2f4/fcfd42e4-d5c6-4b4a-8c62-ae32016f1b9a/4ecaf48c-23a4-4f5e-84b3-ae3201711923/podcast.rss';
+    const rssRes = await fetch(rssUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0)' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (rssRes.ok) {
+      const xml = await rssRes.text();
+      const items = xml.match(/<item>([\s\S]*?)<\/item>/gi) || [];
+      for (const itemXml of items) {
+        const titleMatch = itemXml.match(/<title>([\s\S]*?)<\/title>/i);
+        const pubDateMatch = itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+        const rssItemTitle = titleMatch ? decodeHTMLEntities(titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim()) : '';
+
+        let itemDate = '';
+        if (pubDateMatch && pubDateMatch[1]) {
+          const parsedD = new Date(pubDateMatch[1].trim());
+          if (!isNaN(parsedD.getTime())) {
+            itemDate = parsedD.toISOString().split('T')[0];
+          }
+        }
+
+        const titleParsedDate = parseDateFromTitle(rssItemTitle);
+        const effectiveItemDate = titleParsedDate || itemDate;
+
+        if (effectiveItemDate === targetDate || rssItemTitle.includes(targetDate)) {
+          const name = extractNameFromHeadline(rssItemTitle) || extractAnalystFromYouTubeTitle(rssItemTitle);
+          if (name) {
+            console.log(`[fetchBnnTopPicksAnalyst] Found authoritative analyst from BNN Podcast RSS: "${name}" for ${targetDate}`);
+            return name;
+          }
+        }
+      }
+    }
+  } catch (rssErr) {
+    console.warn(`[fetchBnnTopPicksAnalyst] BNN podcast RSS lookup failed: ${rssErr.message}`);
+  }
+
   /* Attempt 1: Scrape BNN Hot Picks page directly */
   try {
     const res = await fetch('https://www.bnnbloomberg.ca/investing/hot-picks/', {
@@ -903,40 +1295,30 @@ export async function fetchBnnTopPicksAnalyst(targetDate) {
 
 /**
  * Resolves the analyst name hierarchy:
- * 1. Audio transcript extraction (primary ground truth)
- * 2. Phonetic override dictionary
- * 3. Authoritative BNN article if published for targetDateStr
- * 4. Date-verified YouTube title if published for targetDateStr
- * 5. Audio-only fallback with pronunciation disclaimer
+ * 1. Authoritative BNN schedule / article / RSS guest for targetDateStr (overrides heard name)
+ * 2. Date-verified YouTube / video title for targetDateStr
+ * 3. Dynamic Database Fuzzy & Phonetic Matcher (Levenshtein <= 2, same last name + phonetic first name, firm corroboration)
+ * 4. Audio-only fallback with pronunciation disclaimer
  */
-export function resolveAnalystName(rawGuest, videoTitle = '', description = '', bnnArticleGuest = '', targetDateStr = '') {
+export function resolveAnalystName(rawGuest, videoTitle = '', description = '', bnnArticleGuest = '', targetDateStr = '', guestFirm = '') {
   if (!rawGuest || typeof rawGuest !== 'string') {
     return { name: 'BNN Bloomberg Guest', confidence: 'audio_only', disclaimer: null };
   }
 
   const cleanedRaw = rawGuest.trim();
-  const lower = cleanedRaw.toLowerCase();
 
-  /* Priority 1: Phonetic override dictionary */
-  if (PHONETIC_ANALYST_OVERRIDES[lower]) {
-    return {
-      name: PHONETIC_ANALYST_OVERRIDES[lower],
-      confidence: 'phonetic_override',
-      disclaimer: null,
-    };
-  }
-
-  /* Priority 2: BNN article-confirmed analyst name (scraped from Top Picks page) */
+  /* Priority 1: BNN article or RSS schedule-confirmed analyst name for targetDateStr */
   if (bnnArticleGuest && typeof bnnArticleGuest === 'string' && bnnArticleGuest.trim().length > 2) {
-    console.log(`[resolveAnalystName] Using BNN article-confirmed analyst: "${bnnArticleGuest.trim()}" (Audio/LLM said: "${rawGuest}")`);
+    const verifiedName = bnnArticleGuest.trim();
+    console.log(`[resolveAnalystName] Using authoritative BNN schedule-confirmed analyst: "${verifiedName}" (Audio/LLM said: "${cleanedRaw}")`);
     return {
-      name: bnnArticleGuest.trim(),
+      name: verifiedName,
       confidence: 'official_article',
       disclaimer: null,
     };
   }
 
-  /* Priority 3: YouTube video title extraction (STRICTLY ONLY IF video date matches targetDateStr) */
+  /* Priority 2: Video title extraction (STRICTLY ONLY IF video date matches targetDateStr) */
   if (videoTitle) {
     let titleDateOk = false;
     if (targetDateStr) {
@@ -959,6 +1341,17 @@ export function resolveAnalystName(rawGuest, videoTitle = '', description = '', 
     }
   }
 
+  /* Priority 3: Dynamic Database & Phonetic Fuzzy Matcher (for mishearings) */
+  const dbMatch = matchKnownAnalyst(cleanedRaw, guestFirm);
+  if (dbMatch.matched && dbMatch.confidence !== 'exact_database_match') {
+    console.log(`[resolveAnalystName] Matched known analyst: "${cleanedRaw}" -> "${dbMatch.name}" (${dbMatch.confidence}, distance ${dbMatch.distance})`);
+    return {
+      name: dbMatch.name,
+      confidence: dbMatch.confidence,
+      disclaimer: null,
+    };
+  }
+
   /* Priority 4: Default to audio heard name + disclaimer */
   return {
     name: cleanedRaw,
@@ -967,73 +1360,195 @@ export function resolveAnalystName(rawGuest, videoTitle = '', description = '', 
   };
 }
 
-export function sanitizeAnalystName(rawGuest, videoTitle = '', description = '', bnnArticleGuest = '', targetDateStr = '') {
-  return resolveAnalystName(rawGuest, videoTitle, description, bnnArticleGuest, targetDateStr).name;
+export function sanitizeAnalystName(rawGuest, videoTitle = '', description = '', bnnArticleGuest = '', targetDateStr = '', guestFirm = '') {
+  return resolveAnalystName(rawGuest, videoTitle, description, bnnArticleGuest, targetDateStr, guestFirm).name;
 }
 
 /**
- * Consecutive Day Double-Mention Anomaly Detector.
- * BNN Market Call does not host the same analyst two days in a row.
- * Checks against the previous completed digest in Supabase.
+ * Canadian / TSX Market Holiday Calendar Engine.
+ * Accurately calculates all statutory Canadian market holidays where the TSX is closed
+ * and BNN Bloomberg does not produce live Market Call programming.
  */
-export async function detectConsecutiveDayDouble(targetDateStr, newDigest, supabase) {
+export function getEasterSunday(year) {
+  const f = Math.floor;
+  const G = year % 19;
+  const C = f(year / 100);
+  const H = (C - f(C / 4) - f((8 * C + 13) / 25) + 19 * G + 15) % 30;
+  const I = H - f(H / 28) * (1 - f(29 / (H + 1)) * f((21 - G) / 11));
+  const J = (year + f(year / 4) + I + 2 - C + f(C / 4)) % 7;
+  const L = I - J;
+  const month = 3 + f((L + 40) / 44);
+  const day = L + 28 - 31 * f(month / 4);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+export function getNthWeekdayOfMonth(year, month, weekday, n) {
+  const d = new Date(Date.UTC(year, month, 1));
+  let count = 0;
+  while (d.getUTCMonth() === month) {
+    if (d.getUTCDay() === weekday) {
+      count++;
+      if (count === n) return d;
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return null;
+}
+
+export function isCanadianMarketHoliday(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const d = new Date(dateStr + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return false;
+  const year = d.getUTCFullYear();
+  const dayOfWeek = d.getUTCDay();
+
+  // Weekend
+  if (dayOfWeek === 0 || dayOfWeek === 6) return true;
+
+  const toYMD = (dt) => dt.toISOString().split('T')[0];
+  const holidays = new Set();
+
+  // New Year's Day (Jan 1, observed Jan 2 if Sunday)
+  const ny = new Date(Date.UTC(year, 0, 1));
+  if (ny.getUTCDay() === 0) holidays.add(toYMD(new Date(Date.UTC(year, 0, 2))));
+  else if (ny.getUTCDay() !== 6) holidays.add(toYMD(ny));
+
+  // Family Day: 3rd Monday in February
+  const familyDay = getNthWeekdayOfMonth(year, 1, 1, 3);
+  if (familyDay) holidays.add(toYMD(familyDay));
+
+  // Good Friday: 2 days before Easter
+  const easter = getEasterSunday(year);
+  const goodFriday = new Date(easter.getTime() - 2 * 86400000);
+  holidays.add(toYMD(goodFriday));
+
+  // Victoria Day: Monday on or before May 24
+  const vDay = new Date(Date.UTC(year, 4, 24));
+  while (vDay.getUTCDay() !== 1) {
+    vDay.setUTCDate(vDay.getUTCDate() - 1);
+  }
+  holidays.add(toYMD(vDay));
+
+  // Canada Day: July 1 (observed July 2 if Sunday)
+  const canadaDay = new Date(Date.UTC(year, 6, 1));
+  if (canadaDay.getUTCDay() === 0) holidays.add(toYMD(new Date(Date.UTC(year, 6, 2))));
+  else if (canadaDay.getUTCDay() !== 6) holidays.add(toYMD(canadaDay));
+
+  // Civic Holiday: 1st Monday in August
+  const civicHoliday = getNthWeekdayOfMonth(year, 7, 1, 1);
+  if (civicHoliday) holidays.add(toYMD(civicHoliday));
+
+  // Labour Day: 1st Monday in September
+  const labourDay = getNthWeekdayOfMonth(year, 8, 1, 1);
+  if (labourDay) holidays.add(toYMD(labourDay));
+
+  // Canadian Thanksgiving: 2nd Monday in October
+  const thanksgiving = getNthWeekdayOfMonth(year, 9, 1, 2);
+  if (thanksgiving) holidays.add(toYMD(thanksgiving));
+
+  // Christmas (Dec 25) & Boxing Day (Dec 26)
+  holidays.add(toYMD(new Date(Date.UTC(year, 11, 25))));
+  holidays.add(toYMD(new Date(Date.UTC(year, 11, 26))));
+
+  return holidays.has(dateStr);
+}
+
+/**
+ * Syndicated Rebroadcast & Duplicate Episode Anomaly Detector.
+ * Inspects recent completed digests within a 14-day rolling window to identify:
+ * 1. Syndicated holiday reruns (same analyst with identical picks / commentary rebroadcast on holiday).
+ * 2. Consecutive day double-mention anomalies (BNN Market Call does not host the same analyst two days in a row).
+ */
+export async function detectRebroadcastOrDuplicate(targetDateStr, newDigest, supabase) {
   if (!targetDateStr || !newDigest || !supabase) return null;
 
   try {
-    const { data: prevRows, error } = await supabase
+    const cutoffDate = new Date(new Date(targetDateStr).getTime() - 14 * 86400000).toISOString().split('T')[0];
+    let query = supabase
       .from('digest_jobs')
       .select('id, episode_date, result')
-      .lt('episode_date', targetDateStr)
+      .lt('episode_date', targetDateStr);
+
+    if (typeof query.gte === 'function') {
+      query = query.gte('episode_date', cutoffDate);
+    }
+
+    const { data: pastRows, error } = await query
       .eq('status', 'complete')
       .not('result', 'is', null)
       .order('episode_date', { ascending: false })
-      .limit(1);
+      .limit(10);
 
-    if (error || !prevRows || prevRows.length === 0) return null;
+    if (error || !pastRows || pastRows.length === 0) return null;
 
-    const prevEpisode = prevRows[0];
-    const prevDigest = prevEpisode.result?.digest;
-    if (!prevDigest) return null;
-
-    const prevGuest = (prevDigest.guest || '').trim().toLowerCase();
     const currGuest = (newDigest.guest || '').trim().toLowerCase();
-
-    // Check if analyst name matches (excluding generic guest)
-    const guestMatches = Boolean(prevGuest && currGuest && prevGuest === currGuest && !prevGuest.includes('guest'));
-
-    // Check if picks overlap significantly (>50% identical tickers)
-    const prevPicks = (prevDigest.picks || []).map((p) => (p.ticker || p.company || '').toUpperCase().trim()).filter(Boolean);
     const currPicks = (newDigest.picks || []).map((p) => (p.ticker || p.company || '').toUpperCase().trim()).filter(Boolean);
 
-    const commonPicks = currPicks.filter((p) => prevPicks.includes(p));
-    const pickOverlapRatio = currPicks.length > 0 ? commonPicks.length / currPicks.length : 0;
-    const picksMatch = currPicks.length >= 2 && pickOverlapRatio >= 0.5;
+    for (let i = 0; i < pastRows.length; i++) {
+      const pastEpisode = pastRows[i];
+      const pastDigest = pastEpisode.result?.digest;
+      if (!pastDigest) continue;
 
-    if (guestMatches || picksMatch) {
-      const reason = guestMatches && picksMatch
-        ? `identical analyst (${newDigest.guest}) and overlapping picks`
-        : guestMatches
-        ? `identical analyst (${newDigest.guest})`
-        : `overlapping picks (${commonPicks.join(', ')})`;
+      const pastGuest = (pastDigest.guest || '').trim().toLowerCase();
+      const guestMatches = Boolean(
+        currGuest &&
+        pastGuest &&
+        (currGuest === pastGuest || currGuest.includes(pastGuest) || pastGuest.includes(currGuest)) &&
+        !currGuest.includes('guest')
+      );
 
-      const warningMsg = `Potential duplicate episode anomaly: Matches ${reason} from ${prevEpisode.episode_date}. BNN Market Call does not host the same analyst two consecutive trading days.`;
-      console.warn(`[detectConsecutiveDayDouble] ${warningMsg}`);
+      const pastPicks = (pastDigest.picks || []).map((p) => (p.ticker || p.company || '').toUpperCase().trim()).filter(Boolean);
+      const commonPicks = currPicks.filter((p) => pastPicks.includes(p));
+      const pickOverlapRatio = currPicks.length > 0 ? commonPicks.length / currPicks.length : 0;
+      const picksMatch = currPicks.length >= 2 && pickOverlapRatio >= 0.5;
 
-      return {
-        isDouble: true,
-        prevDate: prevEpisode.episode_date,
-        matchedGuest: guestMatches,
-        matchedPicks: picksMatch,
-        commonPicks,
-        warningMessage: warningMsg,
-      };
+      // Rebroadcast Detection: Same analyst AND high pick overlap in 14-day window
+      if (guestMatches && picksMatch) {
+        const isHoliday = isCanadianMarketHoliday(targetDateStr);
+        const warningMsg = `Syndicated rebroadcast detected: Matches identical analyst (${newDigest.guest}) and overlapping picks (${commonPicks.join(', ')}) from ${pastEpisode.episode_date}.${isHoliday ? ' Note: Date is a Canadian exchange holiday (TSX closed).' : ''}`;
+        console.warn(`[detectRebroadcastOrDuplicate] ${warningMsg}`);
+
+        return {
+          isDouble: true,
+          isRebroadcast: true,
+          isHolidayRebroadcast: isHoliday,
+          originalDate: pastEpisode.episode_date,
+          originalJobId: pastEpisode.id,
+          prevDate: pastEpisode.episode_date,
+          matchedGuest: true,
+          matchedPicks: true,
+          commonPicks,
+          warningMessage: warningMsg,
+        };
+      }
+
+      // Consecutive Day Check: only for the immediate previous recorded broadcast (i === 0)
+      if (i === 0 && (guestMatches || picksMatch)) {
+        const reason = guestMatches
+          ? `identical analyst (${newDigest.guest})`
+          : `overlapping picks (${commonPicks.join(', ')})`;
+        const warningMsg = `Potential duplicate episode anomaly: Matches ${reason} from ${pastEpisode.episode_date}. BNN Market Call does not host the same analyst two consecutive trading days.`;
+        console.warn(`[detectRebroadcastOrDuplicate] ${warningMsg}`);
+
+        return {
+          isDouble: true,
+          isRebroadcast: false,
+          prevDate: pastEpisode.episode_date,
+          matchedGuest: guestMatches,
+          matchedPicks: picksMatch,
+          commonPicks,
+          warningMessage: warningMsg,
+        };
+      }
     }
   } catch (err) {
-    console.warn('[detectConsecutiveDayDouble] Check failed:', err.message);
+    console.warn('[detectRebroadcastOrDuplicate] Check failed:', err.message);
   }
 
   return null;
 }
+
+export const detectConsecutiveDayDouble = detectRebroadcastOrDuplicate;
 
 /* ════════════════════════════════════════════════════════════════
    Digest post-processing & canonical entity sanitization
@@ -1245,6 +1760,9 @@ STRICT ACCURACY & GROUNDING RULES:
      * "sell": Analyst explicitly recommends selling, trimming, or exiting a position they currently hold, or explicitly says to sell/exit if you own it.
      * "hold": Analyst recommends holding, neutral posture, wait-and-see, fair valuation, or is not owned + waiting for a specific condition to improve (e.g. staying on the sidelines pending proof of a turnaround = HOLD, not SELL).
      * "unsure": Analyst is uncertain, hesitant, declined to take a position, or gives a mixed/ambiguous opinion.
+   - RISK-REWARD & EXECUTION STRUCTURE:
+     * Note any stated target prices, current trading prices, and expected upside delta.
+     * If an analyst cites stretched/high valuation and advises a defensive structure (e.g. selling short-dated covered calls to manufacture yield, advising staged limit buy orders down 10-15% as downside buffers, or avoiding a full position), explicitly detail this in the reasoning. Do NOT present defensive covered-call yield trades or capped-upside hedges as high-conviction directional long bets.
 5. COMPLETE COVERAGE OF ALL SEGMENTS:
    - "picks": MUST contain EXACTLY the guest's NEW official featured Top Picks (typically 3 stocks) introduced for today's market.
    - "callerMentions": MUST contain ALL caller Q&A stock discussions and sector overviews (e.g. Canadian Banks like RY, TD, BMO). Do NOT drop caller turns or sector exchanges.

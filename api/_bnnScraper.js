@@ -4,6 +4,8 @@
  * Strictly zero LLM tokens burned.
  */
 
+import { matchKnownAnalyst } from './_pipeline.js';
+
 const BROWSER_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -25,13 +27,10 @@ export function normalizeAnalystName(rawName) {
     .replace(/\s+(Senior|Portfolio|Wealth|Advisor|Manager|Managing|Director|Vice|President|Chief|VP|CEO).*$/i, '')
     .trim();
 
-  /* Canonical Identity Resolution Step */
-  const lower = cleaned.toLowerCase();
-  if (lower.includes('nono-womdim') || lower.includes('nono-wamden') || lower.includes('nono wamden') || lower.includes('nono womdim')) {
-    return 'Julien Nono-Womdim';
-  }
-  if (lower.includes('klymochko')) {
-    return 'Julian Klymochko';
+  /* Automated Database & Phonetic Fuzzy Disambiguation Step */
+  const match = matchKnownAnalyst(cleaned);
+  if (match.matched) {
+    return match.name;
   }
 
   return cleaned;
@@ -129,31 +128,45 @@ export function parseBnnPastPicksArticle(html, sourceUrl, fallbackAnalystName = 
     .replace(/&nbsp;/g, ' ')
     .replace(/\s+/g, ' ');
 
-  /* Extract Analyst Name from article body if available */
-  let analystName = normalizeAnalystName(fallbackAnalystName);
-  if (!analystName || analystName === 'BNN Analyst') {
-    const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-    if (titleMatch && titleMatch[1]) {
-      const match = titleMatch[1].match(/^([^'’]+)(?:'s|’s)\s+(?:Top|Past)\s+Picks/i);
-      if (match && match[1]) {
-        analystName = normalizeAnalystName(match[1]);
-      }
+  /* Extract Authoritative Analyst Name from article title or URL */
+  let titleAnalyst = '';
+  const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+  if (titleMatch && titleMatch[1]) {
+    const cleanTitle = titleMatch[1];
+    const m = cleanTitle.match(/(?:^|:\s*|\s+-\s+|\s+–\s+|\s+—\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z\-]+)+)(?:['’]s|['’])\s+(?:Top|Past)\s+Picks/i);
+    if (m && m[1]) {
+      titleAnalyst = normalizeAnalystName(m[1]);
     }
   }
 
-  if (!analystName) analystName = 'BNN Analyst';
+  if (!titleAnalyst && sourceUrl) {
+    const urlMatch = /\/([a-z]+-[a-z]+)(?:-s)?-(?:top|past)-picks/i.exec(sourceUrl);
+    if (urlMatch && urlMatch[1]) {
+      const nameFromUrl = urlMatch[1].split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      titleAnalyst = normalizeAnalystName(nameFromUrl);
+    }
+  }
 
-  /* Parse pick review date: Prioritize article URL date (/YYYY/MM/DD/) for exact review date, with fallback to in-text date */
-  let pickPublishDate = new Date().toISOString().split('T')[0];
+  let analystName = titleAnalyst || normalizeAnalystName(fallbackAnalystName) || 'BNN Analyst';
+
+  /* Parse pick review date and original historical pick date:
+     - URL date (/YYYY/MM/DD/) represents the air/review date when the past picks segment was broadcast.
+     - The section header (e.g. "PAST PICKS: SEPT. 18, 2025") represents the TRUE original recommendation initiation date.
+     Setting pickPublishDate to the original initiation date prevents retroactive reviews from being misclassified
+     as new forward-looking top picks and computes holding-period benchmark alpha accurately. */
+  let articleReviewDate = new Date().toISOString().split('T')[0];
   const urlDateMatch = /\/(\d{4})\/(\d{2})\/(\d{2})\//.exec(sourceUrl);
   if (urlDateMatch) {
-    pickPublishDate = `${urlDateMatch[1]}-${urlDateMatch[2]}-${urlDateMatch[3]}`;
-  } else {
-    const dateMatch = /(?:PAST|TOP)\s+PICKS:?\s*([A-Za-z]+\.?\s*\d{1,2},?\s*\d{4}|\d{4}-\d{2}-\d{2})/i.exec(articleText);
-    if (dateMatch && dateMatch[1]) {
-      pickPublishDate = parseDateToIso(dateMatch[1]);
-    }
+    articleReviewDate = `${urlDateMatch[1]}-${urlDateMatch[2]}-${urlDateMatch[3]}`;
   }
+
+  let originalPickDate = null;
+  const pastSectionDateMatch = /(?:PAST\s+PICKS|PAST\s+PERFORMANCE|PREVIOUS\s+PICKS):?\s*([A-Za-z]+\.?\s*\d{1,2},?\s*\d{4}|\d{4}-\d{2}-\d{2})/i.exec(articleText);
+  if (pastSectionDateMatch && pastSectionDateMatch[1]) {
+    originalPickDate = parseDateToIso(pastSectionDateMatch[1]);
+  }
+
+  const pickPublishDate = originalPickDate || articleReviewDate;
 
   /* Robust Regex to parse individual ticker blocks:
      Handles optional currency, hyphens (GRT-U), double dollar typos ($$68.27), optional Total Return line:

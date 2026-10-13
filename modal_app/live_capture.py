@@ -39,6 +39,70 @@ def resolve_and_verify_stream(url: str) -> str:
         print(f"Warning: Stream resolution failed for {url}: {err}")
     return None
 
+def get_easter_sunday(year: int) -> datetime.date:
+    """Calculate Easter Sunday for a given year using Meeus/Jones/Butcher algorithm."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return datetime.date(year, month, day)
+
+def get_nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> datetime.date:
+    """Find nth weekday of a month (weekday: 0=Mon, 1=Tue... 6=Sun)."""
+    d = datetime.date(year, month, 1)
+    count = 0
+    while d.month == month:
+        if d.weekday() == weekday:
+            count += 1
+            if count == n:
+                return d
+        d += datetime.timedelta(days=1)
+    return None
+
+def is_canadian_market_holiday(date_str: str) -> bool:
+    """Check if date is a statutory Canadian TSX exchange holiday (BNN produces no live Market Call)."""
+    try:
+        d = datetime.date.fromisoformat(date_str)
+    except Exception:
+        return False
+    if d.weekday() in (5, 6):
+        return True
+    year = d.year
+    holidays = set()
+    holidays.add(datetime.date(year, 1, 1)) # New Year's Day
+    family_day = get_nth_weekday_of_month(year, 2, 0, 3) # 3rd Mon in Feb
+    if family_day:
+        holidays.add(family_day)
+    easter = get_easter_sunday(year)
+    holidays.add(easter - datetime.timedelta(days=2)) # Good Friday
+    v_day = datetime.date(year, 5, 24)
+    while v_day.weekday() != 0:
+        v_day -= datetime.timedelta(days=1)
+    holidays.add(v_day) # Victoria Day
+    holidays.add(datetime.date(year, 7, 1)) # Canada Day
+    civic_day = get_nth_weekday_of_month(year, 8, 0, 1) # Civic Holiday (1st Mon in Aug)
+    if civic_day:
+        holidays.add(civic_day)
+    labour_day = get_nth_weekday_of_month(year, 9, 0, 1) # Labour Day (1st Mon in Sep)
+    if labour_day:
+        holidays.add(labour_day)
+    thanksgiving = get_nth_weekday_of_month(year, 10, 0, 2) # Thanksgiving (2nd Mon in Oct)
+    if thanksgiving:
+        holidays.add(thanksgiving)
+    holidays.add(datetime.date(year, 12, 25)) # Christmas Day
+    holidays.add(datetime.date(year, 12, 26)) # Boxing Day
+    return d in holidays
+
 @app.function(
     image=app_image,
     # Runs Mon-Fri at 11:59 AM EST / 8:59 AM PST (captures 12:00 PM - 1:00 PM EST live broadcast)
@@ -83,6 +147,17 @@ def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rs
             today_str = today_dt.strftime("%Y-%m-%d")
         else:
             today_str = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=5)).strftime("%Y-%m-%d")
+
+    # Canadian Exchange / TSX Market Holiday Guard:
+    # TSX is closed on statutory holidays (e.g. Thanksgiving, Labour Day, Good Friday).
+    # BNN Bloomberg does not produce live Market Call programming on holidays (airs syndicated reruns).
+    if not is_test and is_canadian_market_holiday(today_str):
+        print(f"Skipping live capture: {today_str} is a Canadian exchange holiday (TSX closed). BNN Bloomberg does not produce live Market Call programming.")
+        return {
+            "status": "skipped_holiday",
+            "date": today_str,
+            "message": f"TSX exchange holiday: {today_str} produces no live Market Call programming"
+        }
 
     # Broadcast Ceiling Guard: Market Call strictly airs 12:00 PM - 1:00 PM Eastern Time.
     # We allow a 1-minute buffer (13:01:00 ET). Any live stream capture MUST strictly end by 1:01 PM ET.

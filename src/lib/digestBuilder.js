@@ -74,6 +74,9 @@ STRICT RULES:
    - "sell": Analyst explicitly recommends selling, trimming, avoiding, or gives a clear negative/bearish stance.
    - "hold": Analyst recommends holding, neutral posture, wait-and-see, or fair valuation.
    - "unsure": Analyst is uncertain, hesitant, declined to take a position, or gives a mixed/ambiguous opinion.
+9. RISK-REWARD & EXECUTION STRUCTURE:
+   - Note any stated target prices, current trading prices, and expected upside delta.
+   - If an analyst cites stretched/high valuation and advises a defensive structure (e.g. selling short-dated covered calls to manufacture yield, advising staged limit buy orders down 10-15% as downside buffers, or avoiding a full position), explicitly detail this in the reasoning. Do NOT present defensive covered-call yield trades or capped-upside hedges as high-conviction directional long bets.
 
 OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
 {
@@ -100,8 +103,16 @@ OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
       "stance": "buy" | "sell" | "hold" | "unsure"
     }
   ],
+  "pastPicks": [
+    {
+      "ticker": "TICKER",
+      "company": "Company Name",
+      "reasoning": "40-80 words summarizing the past pick evaluation, performance since prior pick date, and current posture (held/exited).",
+      "stance": "buy" | "sell" | "hold" | "unsure"
+    }
+  ],
   "closingNotes": "Optional 50-100 words. Any general macro risks or concluding thoughts the guest mentioned. Empty string if none."
-}`;`;
+}`;
 
   const userPrompt = `Here is the transcript from today's BNN Bloomberg MarketCall episode${videoTitle ? ` titled "${videoTitle}"` : ''}:
 

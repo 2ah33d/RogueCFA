@@ -337,4 +337,229 @@ test('buildDigestPrompt accepts verified matching video title and sets verified 
   assert.ok(userPrompt.includes("titled \"Market Call: Ivana Delevska's outlook on Technology Stocks (Sept. 16, 2026)\""));
 });
 
+test('isCanadianMarketHoliday accurately identifies TSX exchange holidays and normal trading days', async () => {
+  const { isCanadianMarketHoliday } = await import('../api/_pipeline.js');
+
+  assert.equal(isCanadianMarketHoliday('2026-10-12'), true, '2026-10-12 is Canadian Thanksgiving');
+  assert.equal(isCanadianMarketHoliday('2026-09-07'), true, '2026-09-07 is Labour Day');
+  assert.equal(isCanadianMarketHoliday('2026-07-01'), true, '2026-07-01 is Canada Day');
+  assert.equal(isCanadianMarketHoliday('2026-10-06'), false, '2026-10-06 is a normal trading Tuesday');
+  assert.equal(isCanadianMarketHoliday('2026-10-09'), false, '2026-10-09 is a normal trading Friday');
+});
+
+test('resolveAnalystName resolves Ryan Madden phonetic mishearing to Brian Madden', async () => {
+  const { resolveAnalystName } = await import('../api/_pipeline.js');
+
+  const resolved = resolveAnalystName('Ryan Madden');
+  assert.equal(resolved.name, 'Brian Madden', 'Ryan Madden must be disambiguated to Brian Madden');
+  assert.equal(resolved.confidence, 'phonetic_override');
+});
+
+test('detectRebroadcastOrDuplicate identifies 14-day holiday syndicated rebroadcast', async () => {
+  const { detectRebroadcastOrDuplicate } = await import('../api/_pipeline.js');
+
+  const mockSupabase = {
+    from: () => ({
+      select: () => ({
+        lt: () => ({
+          gte: () => ({
+            eq: () => ({
+              not: () => ({
+                order: () => ({
+                  limit: async () => ({
+                    data: [
+                      {
+                        id: 'live-2026-10-09',
+                        episode_date: '2026-10-09',
+                        result: {
+                          digest: {
+                            guest: 'Brian Madden',
+                            picks: [{ ticker: 'FTS' }, { ticker: 'LLY' }, { ticker: 'XOM' }],
+                          },
+                        },
+                      },
+                      {
+                        id: 'live-2026-10-06',
+                        episode_date: '2026-10-06',
+                        result: {
+                          digest: {
+                            guest: 'Kim Bolton',
+                            picks: [{ ticker: 'TSEM' }, { ticker: 'PLTR' }, { ticker: 'CEG' }],
+                          },
+                        },
+                      },
+                    ],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  };
+
+  const newDigest = {
+    guest: 'Kim Bolton',
+    picks: [{ ticker: 'TSEM' }, { ticker: 'PLTR' }, { ticker: 'CEG' }],
+  };
+
+  const check = await detectRebroadcastOrDuplicate('2026-10-12', newDigest, mockSupabase);
+  assert.ok(check, 'Must detect duplicate check result');
+  assert.equal(check.isRebroadcast, true, 'Must flag as rebroadcast');
+  assert.equal(check.originalDate, '2026-10-06', 'Original date must be 2026-10-06');
+  assert.equal(check.isHolidayRebroadcast, true, 'Must identify as holiday rebroadcast on Thanksgiving');
+});
+
+test('parseBnnPastPicksArticle extracts true historical pick date from PAST PICKS header and disambiguates title', async () => {
+  const { parseBnnPastPicksArticle } = await import('../api/_bnnScraper.js');
+
+  const html = `
+    <html>
+      <head><title>AI stocks drop as tech weighs: Brian Madden’s Top Picks for Sept. 4, 2026 – BNN Bloomberg</title></head>
+      <body>
+        <h1>TOP PICKS</h1>
+        <p>Teck Resources (TECK.B TSX)</p>
+        <h2>PAST PICKS: SEPT. 18, 2025</h2>
+        <p>Constellation Software (CSU TSX) Then: $4310.95 Now: $2952.50 Return: -32% Total Return: -31%</p>
+        <p>KKR (KKR NYSE) Then: US$149.34 Now: US$107.17 Return: -28% Total Return: -28%</p>
+        <p>Telus (T TSX) Then: $21.83 Now: $13.35 Return: -39% Total Return: -33%</p>
+      </body>
+    </html>
+  `;
+
+  const rows = parseBnnPastPicksArticle(html, 'https://www.bnnbloomberg.ca/markets/2026/09/04/brian-maddens-top-picks-for-sept-4-2026/', 'Ryan Madden');
+
+  assert.equal(rows.length, 3, 'Must extract 3 past picks');
+  assert.equal(rows[0].analyst_name, 'Brian Madden', 'Must extract Brian Madden and not AI stocks drop or Ryan Madden');
+  assert.equal(rows[0].pick_publish_date, '2025-09-18', 'Must use original initiation date 2025-09-18, NOT article review date 2026-09-04');
+  assert.equal(rows[0].ticker, 'CSU.TO', 'Ticker must be formatted with .TO');
+  assert.equal(rows[1].ticker, 'KKR');
+  assert.equal(rows[2].ticker, 'T.TO');
+});
+
+test('extractDateFromTranscript accurately parses verbal host date declarations from audio intro', async () => {
+  const { extractDateFromTranscript } = await import('../api/_pipeline.js');
+
+  const t1 = "Welcome to Market Call for Tuesday, October 6th, 2026. I'm Michael Hainsworth. Kim Bolton with us today...";
+  assert.equal(extractDateFromTranscript(t1), '2026-10-06');
+
+  const t2 = "Good afternoon and welcome to Market Call on this Tuesday, October 6th. Joining us today is Kim Bolton...";
+  assert.equal(extractDateFromTranscript(t2, 2026), '2026-10-06');
+
+  const t3 = "Welcome to Market Call, Friday, October 9th, 2026. Brian Madden is our guest...";
+  assert.equal(extractDateFromTranscript(t3), '2026-10-09');
+
+  const t4 = "Today is Tuesday, October 6th. We're talking technology stocks with Kim Bolton...";
+  assert.equal(extractDateFromTranscript(t4, 2026), '2026-10-06');
+
+  const t5 = "This episode broadcast on October the 6th, 2026 with Kim Bolton.";
+  assert.equal(extractDateFromTranscript(t5), '2026-10-06');
+
+  const tNone = "Welcome to the show. Let's look at the market rally today with tech stocks soaring...";
+  assert.equal(extractDateFromTranscript(tNone, 2026), null);
+});
+
+test('detectBroadcastDateMismatch halts generation when content date contradicts target generation date', async () => {
+  const { detectBroadcastDateMismatch } = await import('../api/_pipeline.js');
+
+  // Case 1: Audio from Oct 6 rerun presented on Oct 12 holiday
+  const oct6Transcript = "Welcome to Market Call for Tuesday, October 6th, 2026. Kim Bolton with us today...";
+  const mismatch = detectBroadcastDateMismatch('2026-10-12', {
+    transcript: oct6Transcript,
+    title: "BNN Bloomberg Market Call (Live Broadcast)",
+  });
+  assert.equal(mismatch.hasMismatch, true, 'Must detect date mismatch');
+  assert.equal(mismatch.detectedDate, '2026-10-06');
+  assert.equal(mismatch.targetDate, '2026-10-12');
+  assert.ok(mismatch.reason.includes('2026-10-06'), 'Reason must cite detected date');
+  assert.ok(mismatch.reason.includes('2026-10-12'), 'Reason must cite target date');
+
+  // Case 2: Matching date
+  const match = detectBroadcastDateMismatch('2026-10-06', {
+    transcript: oct6Transcript,
+    title: "BNN Bloomberg Market Call (Oct. 6, 2026)",
+  });
+  assert.equal(match.hasMismatch, false, 'No mismatch when content matches target date');
+  assert.equal(match.detectedDate, '2026-10-06');
+
+  // Case 3: Title date mismatch
+  const titleMismatch = detectBroadcastDateMismatch('2026-10-12', {
+    title: "Kim Bolton's Market Outlook: Technology Stocks (Oct. 6, 2026)",
+  });
+  assert.equal(titleMismatch.hasMismatch, true);
+  assert.equal(titleMismatch.detectedDate, '2026-10-06');
+});
+
+test('matchKnownAnalyst dynamically disambiguates phonetic audio mishearings without hardcoded 1-off overrides', async () => {
+  const { matchKnownAnalyst, levenshteinDistance } = await import('../api/_pipeline.js');
+
+  assert.equal(levenshteinDistance('Ryan Madden', 'Brian Madden'), 2);
+  assert.equal(levenshteinDistance('Tim Bolton', 'Kim Bolton'), 1);
+  assert.equal(levenshteinDistance('Dan Wong', 'Stan Wong'), 2);
+
+  // Ryan Madden -> Brian Madden (Levenshtein distance 1 on first name + exact last name)
+  const m1 = matchKnownAnalyst('Ryan Madden');
+  assert.equal(m1.matched, true);
+  assert.equal(m1.name, 'Brian Madden');
+
+  // Tim Bolton -> Kim Bolton
+  const m2 = matchKnownAnalyst('Tim Bolton');
+  assert.equal(m2.matched, true);
+  assert.equal(m2.name, 'Kim Bolton');
+
+  // Dan Wong -> Stan Wong
+  const m3 = matchKnownAnalyst('Dan Wong');
+  assert.equal(m3.matched, true);
+  assert.equal(m3.name, 'Stan Wong');
+
+  // Bruce Gamble -> Bruce Campbell (edit distance 2)
+  const m4 = matchKnownAnalyst('Bruce Gamble');
+  assert.equal(m4.matched, true);
+  assert.equal(m4.name, 'Bruce Campbell');
+
+  // Firm corroboration: "Bryan" with firm "First Avenue"
+  const m5 = matchKnownAnalyst('Bryan', 'First Avenue Investment Counsel');
+  assert.equal(m5.matched, true);
+  assert.equal(m5.name, 'Brian Madden');
+
+  // Unknown brand-new analyst: stays unmodified without false coercion
+  const m6 = matchKnownAnalyst('Sarah Jenkins');
+  assert.equal(m6.matched, false);
+  assert.equal(m6.name, 'Sarah Jenkins');
+});
+
+test('normalizeAnalystName in _bnnScraper leverages dynamic fuzzy matcher', async () => {
+  const { normalizeAnalystName } = await import('../api/_bnnScraper.js');
+
+  assert.equal(normalizeAnalystName('Ryan Madden, Chief Investment Officer, First Avenue'), 'Brian Madden');
+  assert.equal(normalizeAnalystName('Tim Bolton, Senior Portfolio Manager'), 'Kim Bolton');
+  assert.equal(normalizeAnalystName('Dan Wong, Portfolio Manager'), 'Stan Wong');
+  assert.equal(normalizeAnalystName('Julien Nono-Wamden'), 'Julien Nono-Womdim');
+  assert.equal(normalizeAnalystName('Julian Klymochko'), 'Julian Klymochko');
+});
+
+test('resolveAnalystName respects authoritative schedule and database fuzzy fallback', async () => {
+  const { resolveAnalystName } = await import('../api/_pipeline.js');
+
+  // Priority 1: Authoritative schedule / article guest overrides heard audio name
+  const r1 = resolveAnalystName('Ryan Madden', '', '', 'Brian Madden', '2026-10-09');
+  assert.equal(r1.name, 'Brian Madden');
+  assert.equal(r1.confidence, 'official_article');
+
+  // Priority 3: When no article or video schedule is present, database fuzzy matcher automatically resolves
+  const r2 = resolveAnalystName('Dan Wong');
+  assert.equal(r2.name, 'Stan Wong');
+  assert.equal(r2.confidence, 'database_fuzzy_match');
+  assert.equal(r2.disclaimer, null);
+
+  // Fallback: completely unknown analyst
+  const r3 = resolveAnalystName('Sarah Jenkins');
+  assert.equal(r3.name, 'Sarah Jenkins');
+  assert.equal(r3.confidence, 'audio_only');
+  assert.ok(r3.disclaimer.includes('heard from live audio broadcast'));
+});
+
+
 

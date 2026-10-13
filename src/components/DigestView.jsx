@@ -498,9 +498,9 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
           return;
         }
 
-        if (data.status === 'error') {
+        if (data.status === 'error' || data.status === 'date_mismatch') {
           setError({
-            type: data.error?.includes('no_transcript') ? 'no_transcript' : 'api_error',
+            type: data.status === 'date_mismatch' ? 'date_mismatch' : (data.error?.includes('no_transcript') ? 'no_transcript' : 'api_error'),
             message: data.error || 'Processing failed. Please try again.',
           });
           stopPolling();
@@ -716,6 +716,28 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                              hover:bg-accent/20 transition-all"
                 >
                   Open Settings {getGroqKey() ? '' : '(Add Groq Key)'}
+                </button>
+              </div>
+            </>
+          ) : error.type === 'date_mismatch' ? (
+            <>
+              <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-amber-500/10 border border-amber-500/30
+                              flex items-center justify-center font-sans font-bold text-lg text-amber-400">
+                DATE
+              </div>
+              <h3 className="text-lg font-bold text-prime mb-2">Broadcast Date Mismatch Guard</h3>
+              {renderDiagnostic(error.message)}
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleCheckNewer()}
+                  className="inline-flex items-center gap-2 px-5 py-2.5
+                             bg-surface-elevated border border-edge
+                             text-prime text-sm font-semibold rounded-lg
+                             hover:border-accent/50 hover:text-accent
+                             transition-all"
+                >
+                  Refresh Episodes
                 </button>
               </div>
             </>

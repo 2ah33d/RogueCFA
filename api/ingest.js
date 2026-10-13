@@ -22,6 +22,9 @@ import {
   sanitizeAnalystName,
   sanitizeDigestResult,
   fetchBnnTopPicksAnalyst,
+  isCanadianMarketHoliday,
+  detectRebroadcastOrDuplicate,
+  detectBroadcastDateMismatch,
 } from './_pipeline.js';
 
 export const config = { maxDuration: 300 };
@@ -146,6 +149,49 @@ export default async function handler(req, res) {
     const cleanedTranscript = cleanRawTranscript(fullText);
     timer.end('Clean Transcript');
 
+    /* ── Broadcast Date Verification Guard ── */
+    const videoTitle = `BNN Bloomberg ${showName} (Live Broadcast)`;
+    const mismatchCheck = detectBroadcastDateMismatch(todayStr, {
+      transcript: cleanedTranscript,
+      title: videoTitle,
+    });
+
+    if (mismatchCheck.hasMismatch) {
+      const isHoliday = isCanadianMarketHoliday(todayStr);
+      const mismatchMsg = mismatchCheck.reason + (isHoliday ? ` Note: ${todayStr} is a Canadian market holiday (TSX closed; BNN aired syndicated rebroadcast).` : '');
+      console.warn(`[api/ingest] ${mismatchMsg}`);
+
+      try {
+        await supabase
+          .from('digest_jobs')
+          .upsert({
+            id: jobId,
+            episode_date: todayStr,
+            status: 'date_mismatch',
+            error_message: mismatchMsg,
+            result: {
+              status: 'date_mismatch',
+              detectedDate: mismatchCheck.detectedDate,
+              targetDate: todayStr,
+              reason: mismatchMsg,
+            },
+            is_debug: false,
+            video_id: '',
+            video_title: videoTitle,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id' });
+      } catch (dbErr) {
+        console.warn('[api/ingest] Supabase date mismatch upsert warning:', dbErr.message);
+      }
+
+      return res.status(409).json({
+        error: mismatchMsg,
+        status: 'date_mismatch',
+        detectedDate: mismatchCheck.detectedDate,
+        targetDate: todayStr,
+      });
+    }
+
     /* ── Step 2: Determine LLM Credentials ── */
     const provider = process.env.CRON_LLM_PROVIDER || process.env.LLM_PROVIDER || 'claude';
     const llmKey = provider === 'groq'
@@ -160,7 +206,6 @@ export default async function handler(req, res) {
 
     /* ── Step 3: Build Digest Prompt & Call LLM ── */
     timer.start('LLM Digest Generation');
-    const videoTitle = `BNN Bloomberg ${showName} (Live Broadcast)`;
     const { systemPrompt, userPrompt } = buildDigestPrompt(cleanedTranscript, videoTitle);
     const rawLLMResponse = await callLLM(provider, llmKey, systemPrompt, userPrompt, timer);
     const llmText = typeof rawLLMResponse === 'string' ? rawLLMResponse : rawLLMResponse.text;
@@ -183,9 +228,28 @@ export default async function handler(req, res) {
     } catch (bnnErr) {
       console.warn('[api/ingest] BNN Top Picks analyst lookup failed:', bnnErr.message);
     }
-    digest.guest = sanitizeAnalystName(digest.guest, videoTitle, '', bnnArticleGuest);
+    digest.guest = sanitizeAnalystName(digest.guest, videoTitle, '', bnnArticleGuest, todayStr, digest.firm || '');
     if (llmUsage) {
       digest.usage = llmUsage;
+    }
+
+    /* Check for Rebroadcast or Duplicate Anomaly */
+    try {
+      const doubleCheck = await detectRebroadcastOrDuplicate(todayStr, digest, supabase);
+      if (doubleCheck && doubleCheck.isDouble) {
+        digest.isConsecutiveDouble = true;
+        digest.doubleAnomaly = doubleCheck;
+        if (doubleCheck.isRebroadcast) {
+          digest.isRebroadcast = true;
+          digest.originalEpisodeDate = doubleCheck.originalDate;
+        }
+        if (!Array.isArray(digest._warnings)) digest._warnings = [];
+        if (!digest._warnings.includes(doubleCheck.warningMessage)) {
+          digest._warnings.push(doubleCheck.warningMessage);
+        }
+      }
+    } catch (doubleErr) {
+      console.warn('[api/ingest] Duplicate check error:', doubleErr.message);
     }
 
     /* ── Step 5: Format Final Result Payload ── */
@@ -223,7 +287,7 @@ export default async function handler(req, res) {
     }
 
     /* ── Step 7: Passive & Cold-Start Track Record Ingestion ── */
-    if (digest.guest) {
+    if (digest.guest && !digest.isRebroadcast) {
       (async () => {
         try {
           const { normalizeAnalystName } = await import('./_bnnScraper.js');

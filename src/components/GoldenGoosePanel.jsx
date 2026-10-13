@@ -148,13 +148,16 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
     } else {
       /* Candidate fallback: present deterministic shortlist candidates directly (capped at top 4) */
       setLlmResult({
-        goldenPicks: buyHoldCandidates.slice(0, 4).map((c) => ({
-          ticker: c.ticker,
-          rationale: `Surfaced from multi-analyst shortlist (${c.buyCount || c.mentionCount} buy mentions across ${c.distinctGuestCount} distinct analysts with +${c.weightedScore} score).`,
-        })),
+        goldenPicks: buyHoldCandidates
+          .filter((c) => !c.isDefensiveOverlay)
+          .slice(0, 4)
+          .map((c) => ({
+            ticker: c.ticker,
+            rationale: `Surfaced from multi-analyst shortlist (${c.buyCount || c.mentionCount} buy mentions across ${c.distinctGuestCount} distinct ${c.distinctGuestCount === 1 ? 'analyst' : 'analysts'} with +${c.weightedScore} score).`,
+          })),
         warningSells: sellCandidates.slice(0, 4).map((c) => ({
           ticker: c.ticker,
-          rationale: `Surfaced from sell candidate shortlist (${c.mentionCount} sell mention, score ${c.weightedScore}).`,
+          rationale: `Surfaced from sell candidate shortlist (${c.mentionCount} sell mention${c.mentionCount === 1 ? '' : 's'}, score ${c.weightedScore}).`,
         })),
         _rejectedTickers: [],
       });
@@ -233,10 +236,13 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
   let warningSells = llmResult?.warningSells || [];
 
   if (goldenPicks.length === 0 && buyHoldCandidates.length > 0) {
-    goldenPicks = buyHoldCandidates.slice(0, 4).map((c) => ({
-      ticker: c.ticker,
-      rationale: `Multi-analyst convergence candidate (+${c.weightedScore} score, ${c.buyCount || c.mentionCount} buy mentions across ${c.distinctGuestCount} analysts).`,
-    }));
+    goldenPicks = buyHoldCandidates
+      .filter((c) => !c.isDefensiveOverlay)
+      .slice(0, 4)
+      .map((c) => ({
+        ticker: c.ticker,
+        rationale: `Multi-analyst convergence candidate (+${c.weightedScore} score, ${c.buyCount || c.mentionCount} buy mentions across ${c.distinctGuestCount} distinct ${c.distinctGuestCount === 1 ? 'analyst' : 'analysts'}).`,
+      }));
   }
 
   if (warningSells.length === 0 && sellCandidates.length > 0) {
@@ -388,7 +394,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                             {isAiCurated ? 'AI CONVICTION' : 'SHORTLIST CANDIDATE'}
                           </span>
                         </div>
-                        <p className="text-xs text-dim line-clamp-1 mt-0.5">{company}</p>
+                        <p className="text-[13px] sm:text-sm text-dim line-clamp-1 mt-0.5">{company}</p>
                       </div>
 
                       {cand && (
@@ -488,7 +494,7 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
                             WARNING SELL
                           </span>
                         </div>
-                        <p className="text-xs text-dim line-clamp-1 mt-0.5">{cand?.company || ticker}</p>
+                        <p className="text-[13px] sm:text-sm text-dim line-clamp-1 mt-0.5">{cand?.company || ticker}</p>
                       </div>
                       {cand && (
                         <span className="text-xs font-bold text-rose-400">{cand.weightedScore} SCORE</span>
