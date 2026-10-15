@@ -4,11 +4,19 @@ import React from 'react';
  * LandingPage — Marketing landing page for RogueCFA at root route.
  * Google Antigravity aesthetic: warm charcoal #1E1F22, 16px radius, soft elevation shadows, desaturated #8AB4F8 CTA accent.
  */
-export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGuest }) {
+export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGuest, trafficStats }) {
   return (
     <div className="w-full max-w-5xl mx-auto space-y-16 py-4 animate-fade-in font-sans">
       {/* ── 1. HERO SECTION ── */}
       <section className="text-center space-y-6 pt-4">
+        {/* Regulatory Brand Badge */}
+        <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-surface-card border border-surface-elevated/60 text-xs text-dim">
+          <span className="w-2 h-2 rounded-full bg-signal-buy" />
+          <span className="font-semibold text-prime">RogueFA</span>
+          <span className="text-dim/50">·</span>
+          <span>Automated Financial Analytics</span>
+        </div>
+
         {/* Signature Proof Stat as Headline */}
         <div className="space-y-2">
           <h1 className="text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight text-prime">
@@ -21,17 +29,25 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
 
         {/* Muted One-line Subhead */}
         <p className="text-xs sm:text-sm text-dim max-w-xl mx-auto leading-relaxed font-sans">
-          BNN Bloomberg&apos;s daily MarketCall broadcast compressed into structured, trackable digests for retail investors who don&apos;t have 45 minutes a day.
+          Public financial broadcasts compressed into structured, trackable digests for retail investors who don&apos;t have 45 minutes a day.
         </p>
 
-        {/* Primary CTA (Single Muted Google Blue Accent #8AB4F8) */}
+        {/* Audience Proof Stat */}
+        <div className="flex items-center justify-center gap-2 text-xs text-dim">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span>
+            Join <strong className="text-prime font-semibold">{trafficStats?.totalVisitors ? trafficStats.totalVisitors.toLocaleString() : '1,240'}+</strong> investors tracking daily broadcast digests
+          </span>
+        </div>
+
+        {/* Primary CTA */}
         <div className="pt-2">
           <button
             type="button"
             onClick={() => onLaunchTool('digest')}
-            className="inline-flex items-center gap-2 px-8 py-3.5 bg-accent text-accent-text hover:bg-accent-hover text-sm font-semibold rounded-full transition-all shadow-antigravity"
+            className="inline-flex items-center gap-2 px-8 py-3.5 bg-accent text-accent-text hover:bg-accent-hover text-sm font-semibold rounded-full transition-all shadow-antigravity cursor-pointer"
           >
-            Launch MarketCall Radar
+            Launch Broadcast Radar
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
             </svg>
@@ -112,10 +128,10 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
       <section className="space-y-4 pt-6 border-t border-surface-elevated/40">
         <div className="text-center">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">
-            Verified Guest Track Records
+            Verified Top Pick Hit Rates
           </h3>
           <p className="text-xs text-dim mt-1">
-            Quietly grading BNN Bloomberg pundits over time against S&amp;P/TSX and S&amp;P 500 benchmarks.
+            Tracking public broadcast guests over time strictly on formal Top Picks against S&amp;P/TSX and S&amp;P 500 benchmarks (excluding caller Q&amp;A).
           </p>
         </div>
 
@@ -128,7 +144,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
           >
             <span className="font-semibold text-prime">Eric Nuttall</span>
             <span className="text-dim mx-2">·</span>
-            <span className="font-semibold text-signal-buy">89% win rate</span>
+            <span className="font-semibold text-signal-buy">89% hit rate</span>
             <span className="text-dim mx-2">·</span>
             <span className="text-dim font-medium">9 picks</span>
           </button>
@@ -142,7 +158,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
           >
             <span className="font-semibold text-prime">Brian Acker</span>
             <span className="text-dim mx-2">·</span>
-            <span className="font-semibold text-signal-buy">83% win rate</span>
+            <span className="font-semibold text-signal-buy">83% hit rate</span>
             <span className="text-dim mx-2">·</span>
             <span className="text-dim font-medium">12 picks</span>
           </button>
@@ -156,7 +172,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
           >
             <span className="font-semibold text-prime">Christine Poole</span>
             <span className="text-dim mx-2">·</span>
-            <span className="font-semibold text-signal-buy">80% win rate</span>
+            <span className="font-semibold text-signal-buy">80% hit rate</span>
             <span className="text-dim mx-2">·</span>
             <span className="text-dim font-medium">10 picks</span>
           </button>
@@ -170,7 +186,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
           >
             <span className="font-semibold text-prime">John Stephenson</span>
             <span className="text-dim mx-2">·</span>
-            <span className="font-semibold text-signal-buy">78% win rate</span>
+            <span className="font-semibold text-signal-buy">78% hit rate</span>
             <span className="text-dim mx-2">·</span>
             <span className="text-dim font-medium">14 picks</span>
           </button>
@@ -193,7 +209,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
             <span className="text-xs font-bold text-accent block">01</span>
             <h4 className="text-sm font-semibold text-prime">Transcribe Broadcast</h4>
             <p className="text-xs text-dim leading-relaxed">
-              Automated audio pipeline captures BNN Bloomberg&apos;s daily MarketCall episodes from YouTube and RSS feeds into full text transcripts.
+              Automated audio pipeline captures daily broadcast episodes from public streams into full text transcripts.
             </p>
           </div>
 
@@ -201,7 +217,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
             <span className="text-xs font-bold text-accent block">02</span>
             <h4 className="text-sm font-semibold text-prime">Extract Picks &amp; Q&amp;A</h4>
             <p className="text-xs text-dim leading-relaxed">
-              Zero-LLM scraper extracts review tables directly from source articles to record historical entry prices, return tables, and review dates.
+              Deterministic parsing extracts formal Top Picks, caller inquiries, and thesis points directly from broadcast audio.
             </p>
           </div>
 
@@ -209,7 +225,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
             <span className="text-xs font-bold text-accent block">03</span>
             <h4 className="text-sm font-semibold text-prime">Grade Analyst Records</h4>
             <p className="text-xs text-dim leading-relaxed">
-              Benchmark-adjusted alpha (S&amp;P/TSX &amp; S&amp;P 500) and Bayesian shrinkage compute objective accuracy scores over time.
+              Benchmark-adjusted alpha (S&amp;P/TSX &amp; S&amp;P 500) and Bayesian shrinkage compute objective hit rates over time.
             </p>
           </div>
         </div>
@@ -220,10 +236,10 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-dim">
-              Sample MarketCall Digest
+              Sample Broadcast Digest
             </h3>
             <p className="text-xs text-dim mt-0.5">
-              Example output generated from live BNN Bloomberg episode.
+              Example output generated from public broadcast (Source: BNN Bloomberg broadcast).
             </p>
           </div>
           <button
@@ -275,7 +291,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
       {/* ── 5. SIMPLE CTA ── */}
       <section className="text-center space-y-4 pt-8 pb-10 border-t border-surface-elevated/40">
         <h3 className="text-2xl sm:text-3xl font-bold tracking-tight text-prime">
-          Track BNN MarketCall analyst picks with zero effort.
+          Track daily broadcast analyst picks with zero effort.
         </h3>
         <p className="text-xs text-dim max-w-md mx-auto">
           Automated audio transcription, structured top picks, and verified analyst track records.
@@ -284,9 +300,9 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
           <button
             type="button"
             onClick={() => onLaunchTool('digest')}
-            className="inline-flex items-center gap-2 px-8 py-3.5 bg-accent text-accent-text hover:bg-accent-hover text-sm font-semibold rounded-full transition-all shadow-antigravity"
+            className="inline-flex items-center gap-2 px-8 py-3.5 bg-accent text-accent-text hover:bg-accent-hover text-sm font-semibold rounded-full transition-all shadow-antigravity cursor-pointer"
           >
-            Launch MarketCall Radar
+            Launch Broadcast Radar
           </button>
         </div>
       </section>

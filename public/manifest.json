@@ -1,0 +1,21 @@
+{
+  "short_name": "RogueFA",
+  "name": "RogueFA — Automated Financial Analytics",
+  "description": "Daily broadcast digests, verified top pick hit rates, and deterministic financial analytics for North American equities.",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1E1F22",
+  "theme_color": "#1E1F22",
+  "display": "standalone"
+}

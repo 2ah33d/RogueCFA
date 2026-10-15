@@ -14,8 +14,10 @@ import TickerSearch from './components/TickerSearch';
 import DigestView from './components/DigestView';
 import LandingPage from './components/LandingPage';
 import NavPill from './components/NavPill';
+import AdminModal from './components/AdminModal';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Menu, X, LayoutDashboard, Search, Sparkles, History } from 'lucide-react';
+import { useTraffic } from './lib/useTraffic';
+import { Menu, X, LayoutDashboard, Search, Sparkles, History, Lock, ShieldCheck } from 'lucide-react';
 
 /* ── Google Antigravity System Tokens ── */
 const THEME = `
@@ -63,13 +65,23 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('landing');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem('roguefa_admin_session'));
+    } catch {
+      return false;
+    }
+  });
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const trafficStats = useTraffic();
 
-  const MOBILE_TABS = [
+  const ALL_MOBILE_TABS = [
     { key: 'landing', label: 'Overview', icon: LayoutDashboard },
     { key: 'search', label: 'Ticker Search', icon: Search },
     { key: 'digest', label: 'Latest Picks', icon: Sparkles },
     { key: 'history', label: 'Score History', icon: History },
   ];
+  const MOBILE_TABS = isAdmin ? ALL_MOBILE_TABS : ALL_MOBILE_TABS.filter((t) => t.key !== 'history');
 
   const [loading, setLoading] = useState(false);
   const [loadingTickers, setLoadingTickers] = useState([]);
@@ -84,6 +96,23 @@ export default function App() {
 
   /* Modal for guest analyst track record */
   const [selectedGuest, setSelectedGuest] = useState(null);
+
+  /* URL & Keyboard shortcut for Admin Login (?admin=login or Ctrl+Shift+A) */
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('admin') === 'login' || urlParams.get('admin') === 'true') {
+      setShowAdminModal(true);
+    }
+
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setShowAdminModal((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   /* Resolve pending history outcomes on mount */
   useEffect(() => {
@@ -137,11 +166,14 @@ export default function App() {
               >
                 <img
                   src="/logo.png"
-                  alt="RogueCFA Logo"
+                  alt="RogueFA Logo"
                   className="w-8 h-8 object-contain rounded-lg group-hover:scale-105 transition-transform duration-300"
                 />
                 <span className="text-lg font-bold tracking-tight text-prime">
-                  RogueCFA
+                  RogueFA
+                </span>
+                <span className="hidden xl:inline text-xs text-dim border-l border-white/10 pl-2.5 select-none font-normal">
+                  Automated Financial Analytics
                 </span>
               </div>
               <a
@@ -158,11 +190,32 @@ export default function App() {
 
             {/* Desktop Nav Pill (hidden on mobile < md) */}
             <div className="hidden md:block">
-              <NavPill activeTab={activeTab} onTabChange={setActiveTab} />
+              <NavPill activeTab={activeTab} onTabChange={setActiveTab} isAdmin={isAdmin} />
             </div>
 
             {/* Header Right Actions */}
             <div className="flex items-center gap-2">
+              {/* Admin Mode Indicator / Login Button */}
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAdminModal(true)}
+                  className="px-2.5 py-1 rounded-full text-xs font-semibold bg-signal-buy/15 text-signal-buy border border-signal-buy/30 hover:bg-signal-buy/25 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer select-none"
+                  title="Admin Console & Traffic Analytics"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-signal-buy animate-pulse" />
+                  <span>Admin Active</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowAdminModal(true)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full text-dim hover:text-prime hover:bg-surface-card transition-all cursor-pointer select-none"
+                  title="Admin Login & Setup (or press Ctrl+Shift+A)"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 onClick={() => setShowSettings(true)}
                 className="w-8 h-8 flex items-center justify-center rounded-full
@@ -294,6 +347,7 @@ export default function App() {
                     setActiveTab('search');
                   }}
                   onSelectGuest={(guest) => setSelectedGuest(guest)}
+                  trafficStats={trafficStats}
                 />
               ) : activeTab === 'score' || activeTab === 'search' ? (
                 <ErrorBoundary fallbackTitle="Ticker Search encountered an issue">
@@ -326,8 +380,31 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* ── Footer ── */}
-        <Disclaimer />
+        {/* ── Persistent Compliance Footer ── */}
+        <Disclaimer
+          onOpenAdmin={() => setShowAdminModal(true)}
+          trafficStats={trafficStats}
+        />
+
+        {/* ── Admin Login & Console Modal ── */}
+        <AnimatePresence>
+          {showAdminModal && (
+            <AdminModal
+              isOpen={showAdminModal}
+              onClose={() => setShowAdminModal(false)}
+              isAdmin={isAdmin}
+              onLoginSuccess={() => {
+                setIsAdmin(true);
+                addToast('Admin mode activated — full site unlocked!', 'info');
+              }}
+              onLogout={() => {
+                setIsAdmin(false);
+                addToast('Logged out of Admin mode.', 'info');
+              }}
+              trafficStats={trafficStats}
+            />
+          )}
+        </AnimatePresence>
 
         {/* ── Settings Drawer ── */}
         <AnimatePresence>

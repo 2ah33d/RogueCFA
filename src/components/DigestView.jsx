@@ -909,21 +909,21 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                 <span>Broadcast Audio Ready in Storage</span>
               </div>
               <h3 className="text-xl font-bold text-prime">
-                MarketCall Audio Ready for {selectedDate || todayStr}
+                Broadcast Audio Ready for {selectedDate || todayStr}
               </h3>
               <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
-                Live broadcast audio is stored in your rolling 5-day window. Click below to transcribe with Groq Whisper and generate an AI digest for this episode.
+                Live broadcast audio is stored in your rolling 5-day window. Click below to transcribe with Groq Whisper and generate a structured digest for this episode.
               </p>
             </div>
           ) : (
             <div className="space-y-1.5">
               <h3 className="text-xl font-bold text-prime">
-                {isUnsavedDate ? `Digest for ${selectedDate} is not saved yet` : 'BNN Bloomberg MarketCall Digest'}
+                {isUnsavedDate ? `Digest for ${selectedDate} is not saved yet` : 'Daily Broadcast Digest'}
               </h3>
               <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
                 {isUnsavedDate
-                  ? `No saved MarketCall episode digest was found for ${selectedDate}. Click below if you would like to generate it.`
-                  : "Click below to fetch and summarize today's episode audio stream with Groq Whisper & AI."}
+                  ? `No saved broadcast digest was found for ${selectedDate}. Click below if you would like to generate it.`
+                  : "Click below to fetch and summarize today's public broadcast stream with Groq Whisper & AI."}
               </p>
             </div>
           )}
@@ -1111,30 +1111,40 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
         <div className="space-y-2">
           {/* Title */}
           <h1 className="text-2xl font-bold tracking-tight text-prime">
-            MarketCall Digest
+            Daily Broadcast Digest
           </h1>
 
-          {/* Subtitle Control Row — Perfectly aligned Date Selector + Merged BNN Source & Check Newer Button */}
+          {/* Subtitle Control Row — Perfectly aligned Date Selector + Source Attribution & Check Newer Button */}
           <div className="flex flex-wrap items-center gap-2.5 pt-0.5">
             <HistoryBrowser
               selectedDate={videoInfo?.episodeDate}
               onSelectDigest={handleSelectHistoricalDigest}
             />
 
-            {/* Merged BNN Bloomberg Source & Check Newer Action Button */}
+            {/* Official Source Attribution Outbound Link */}
+            <a
+              href="https://www.bnnbloomberg.ca/market-call"
+              target="_blank"
+              rel="noreferrer"
+              className="h-8 px-3.5 inline-flex items-center gap-2 bg-surface-card hover:bg-surface-elevated rounded-full text-xs font-medium text-dim hover:text-prime shadow-antigravity transition-all shrink-0"
+              title="View original broadcast details on BNN Bloomberg (Outbound Link)"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              <span>Source: BNN Bloomberg Broadcast</span>
+              <svg className="w-3 h-3 text-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+
+            {/* Check Newer Action Button */}
             <button
               type="button"
               onClick={() => handleCheckNewer()}
               className="h-8 px-3.5 inline-flex items-center gap-2 bg-surface-card hover:bg-surface-elevated rounded-full text-xs font-medium text-prime shadow-antigravity transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer shrink-0"
               title={(videoInfo?.episodeDate && videoInfo.episodeDate !== todayStr)
                 ? `Re-check and refresh data for episode ${videoInfo.episodeDate}`
-                : "Check YouTube & Supabase for a newer BNN Bloomberg MarketCall episode"}
+                : "Check YouTube & Supabase for a newer broadcast episode"}
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-              <span className="text-dim font-medium">
-                {videoInfo?.source === 'bnn_web_player' ? 'BNN Web Media' : videoInfo?.source === 'bnn_rss_podcast' ? 'BNN RSS Audio' : 'BNN Bloomberg'}
-              </span>
-              <span className="w-px h-3.5 bg-surface-elevated shrink-0" />
               <svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>

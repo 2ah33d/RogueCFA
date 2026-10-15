@@ -79,7 +79,7 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
       <div className="p-8 text-center bg-surface-elevated rounded-2xl space-y-3 font-sans shadow-inner">
         <h4 className="text-base font-medium text-prime">No Track Record Recorded Yet</h4>
         <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
-          RogueCFA automatically indexes past picks articles whenever new MarketCall episodes air or when a cold-start search runs for this guest analyst.
+          RogueFA automatically indexes past picks articles whenever new broadcast episodes air or when a cold-start search runs for this guest analyst.
         </p>
         <div className="inline-block bg-surface-card px-3.5 py-1 rounded-full text-xs text-dim font-medium">
           Status: Pending Organic Ingestion
@@ -362,25 +362,25 @@ export default function GuestModal({ guestName, onClose, onSelectTicker, classNa
             <div className="flex items-center gap-2">
               <span className="text-base font-semibold text-prime">{record?.guestName || guestName}</span>
               <span className="text-xs text-dim bg-surface-elevated px-3 py-0.5 rounded-full font-normal">
-                BNN MarketCall Guest
+                Broadcast Guest Analyst · BNN Bloomberg
               </span>
             </div>
             <p className="text-xs text-dim mt-0.5">
-              Historical accuracy and performance verification
+              Historical performance evaluated strictly on formal Top Picks (excluding caller Q&amp;A)
             </p>
           </div>
           <div className="flex items-center gap-3.5">
             {scaledScore != null && (
-              <div className="flex items-center gap-2.5 bg-surface-elevated/70 px-3 py-1.5 rounded-2xl border border-edge/30">
+              <div className="flex items-center gap-2.5 bg-surface-elevated/70 px-3 py-1.5 rounded-2xl border border-edge/30" title="Evaluated strictly on formal Top Picks, excluding caller Q&A">
                 <div className="text-right">
                   <span className="text-[10px] font-bold text-dim uppercase tracking-wider block leading-tight">
-                    Scaled Hit Rate
+                    Top Pick Hit Rate
                   </span>
                   <span className="text-[10px] text-dim/60 leading-tight">
-                    Bayes-Adjusted
+                    Formal Top Picks
                   </span>
                 </div>
-                <ScoreCircle score={scaledScore} loading={loading} label="Scaled" />
+                <ScoreCircle score={scaledScore} loading={loading} label="Hit Rate" />
               </div>
             )}
             <button

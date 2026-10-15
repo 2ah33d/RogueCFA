@@ -12,7 +12,7 @@ app_image = (
     .pip_install("requests", "streamlink")
 )
 
-app = modal.App("roguecfa-live-capture")
+app = modal.App("roguefa-live-capture")
 
 PRIMARY_STREAM_URL = os.environ.get("BNN_LIVE_STREAM_URL") or "https://playerservices.streamtheworld.com/api/livestream-redirect/TV_BNN_ADP.m3u8"
 FALLBACK_STREAM_URLS = [

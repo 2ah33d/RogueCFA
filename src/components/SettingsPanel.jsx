@@ -399,7 +399,7 @@ export default function SettingsPanel({ onClose, onKeysCleared, className = '' }
         {/* Footer info */}
         <div className="text-center pt-4 pb-8 border-t border-surface-card">
           <p className="text-xs text-dim">
-            RogueCFA is client-side BYOK (Bring Your Own Key). Your credentials never touch external databases.
+            RogueFA is client-side BYOK (Bring Your Own Key). Your credentials never touch external databases.
           </p>
         </div>
       </div>

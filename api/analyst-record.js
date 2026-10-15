@@ -268,7 +268,10 @@ export default async function handler(req, res) {
       avgTotalReturn,
       rawScore: Number(rawScore.toFixed(1)),
       credibilityScore,
-      dataSummaryText: `Based on latest ${nTotal} past picks (${uniquePositionsCount} unique positions) across ${totalEpisodesCount} BNN episode${totalEpisodesCount > 1 ? 's' : ''}`,
+      topPickHitRate: credibilityScore,
+      historicalWinRate: credibilityScore,
+      evaluationScope: 'Formal Top Picks only (caller Q&A excluded)',
+      dataSummaryText: `Based on latest ${nTotal} past picks (${uniquePositionsCount} unique positions) across ${totalEpisodesCount} broadcast episode${totalEpisodesCount > 1 ? 's' : ''}`,
       picks: evaluatedPicks,
     });
   } catch (err) {

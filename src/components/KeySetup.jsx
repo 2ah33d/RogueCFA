@@ -36,7 +36,7 @@ export default function KeySetup({ onComplete, className = '' }) {
         <div className="text-center mb-6">
           <div className="inline-flex items-center gap-2 mb-3">
             <span className="text-2xl font-bold tracking-tight text-prime">
-              RogueCFA
+              RogueFA
             </span>
           </div>
           <h1 className="text-lg font-bold text-prime mb-1">Welcome &amp; Key Setup</h1>

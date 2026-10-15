@@ -13,10 +13,12 @@ const TABS = [
  * Clips perfectly inside outer container curves and glides smoothly
  * between tabs without flying in from the side on initial render.
  */
-export default function NavPill({ activeTab, onTabChange }) {
+export default function NavPill({ activeTab, onTabChange, isAdmin = false }) {
+  const visibleTabs = isAdmin ? TABS : TABS.filter((t) => t.key !== 'history');
+
   return (
     <nav className="relative flex items-center gap-1 bg-surface-card p-1 rounded-full shadow-inner text-xs overflow-hidden">
-      {TABS.map((tab) => {
+      {visibleTabs.map((tab) => {
         const isActive = activeTab === tab.key || (tab.alias && activeTab === tab.alias);
         return (
           <button

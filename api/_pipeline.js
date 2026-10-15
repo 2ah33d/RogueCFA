@@ -96,7 +96,7 @@ export function decodeHTMLEntities(str) {
 const BNN_CHANNEL_ID = 'UC5aNPmKYwbudeNngDMTY3lw';
 
 const YOUTUBE_BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0; +https://github.com/2ah33d/RogueCFA.ai)',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
 };
@@ -513,7 +513,7 @@ export async function fetchRssPodcastFallback(groqKey = '', timer, targetDate = 
     try {
       timer?.start('RSS feed fetch');
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0)' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         signal: AbortSignal.timeout(8000),
       });
       const xml = await res.text();
@@ -571,7 +571,7 @@ export async function fetchRssPodcastFallback(groqKey = '', timer, targetDate = 
 
                 timer?.start('MP3 download');
                 const audioRes = await fetch(mp3Url, {
-                  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0)' },
+                  headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                   redirect: 'follow',
                   signal: AbortSignal.timeout(120000)
                 });
@@ -1188,7 +1188,7 @@ export async function fetchBnnTopPicksAnalyst(targetDate) {
   try {
     const rssUrl = 'https://www.omnycontent.com/d/playlist/4809bc8a-e41a-405c-93da-a8cf011df2f4/fcfd42e4-d5c6-4b4a-8c62-ae32016f1b9a/4ecaf48c-23a4-4f5e-84b3-ae3201711923/podcast.rss';
     const rssRes = await fetch(rssUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
       signal: AbortSignal.timeout(4000),
     });
     if (rssRes.ok) {

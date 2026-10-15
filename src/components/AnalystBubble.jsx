@@ -158,7 +158,7 @@ export default function AnalystBubble({
               )}
             </div>
             <p className="text-xs text-dim leading-relaxed mt-0.5 text-left">
-              {firm || record?.firm || 'BNN MarketCall Guest'}
+              {firm || record?.firm || 'Broadcast Guest Analyst'}
             </p>
             {date && (
               <span className="text-[10px] text-dim/70 font-medium block mt-1">
@@ -167,8 +167,10 @@ export default function AnalystBubble({
             )}
           </div>
 
-          {/* Credibility Score Circle Ring */}
-          <ScoreCircle score={score} loading={loading && score == null} />
+          {/* Top Pick Hit Rate Circle Ring */}
+          <div title="Top Pick Hit Rate (Evaluated strictly on formal Top Picks, excluding caller Q&A)">
+            <ScoreCircle score={score} loading={loading && score == null} label="Hit Rate" />
+          </div>
         </div>
 
         {/* Episode Focus */}

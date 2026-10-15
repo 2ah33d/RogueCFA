@@ -322,7 +322,7 @@ async function findRecentMarketCallVideos(youtubeKey) {
    ════════════════════════════════════════════════════════════════ */
 
 const YOUTUBE_BROWSER_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0; +https://github.com/2ah33d/RogueCFA.ai)',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
 };
@@ -537,7 +537,7 @@ async function fetchRssPodcastFallback(groqKey = '') {
   for (const url of rssUrls) {
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0)' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
         signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) continue;
@@ -566,7 +566,7 @@ async function fetchRssPodcastFallback(groqKey = '') {
                 }
 
                 const audioRes = await fetch(mp3Url, {
-                  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RogueCFA/1.0)' },
+                  headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                   redirect: 'follow',
                   signal: AbortSignal.timeout(20000)
                 });
