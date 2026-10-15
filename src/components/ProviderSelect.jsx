@@ -2,7 +2,7 @@ const PROVIDERS = [
   {
     id: 'claude',
     label: 'Anthropic Claude',
-    model: 'claude-sonnet-5 / claude-haiku-4-5',
+    model: 'claude-sonnet-5 / claude-haiku-5-5',
     tag: 'Primary engine',
   },
   {

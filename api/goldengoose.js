@@ -131,7 +131,7 @@ export default async function handler(req, res) {
     let rawText = '';
 
     if (provider === 'claude' || provider === 'anthropic' || process.env.ANTHROPIC_API_KEY) {
-      const models = ['claude-haiku-4-5', 'claude-sonnet-5'];
+      const models = ['claude-haiku-5-5', 'claude-sonnet-5'];
       let lastErr = null;
 
       for (const model of models) {

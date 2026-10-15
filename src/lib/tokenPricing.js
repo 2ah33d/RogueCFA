@@ -1,7 +1,7 @@
 /**
  * Token Pricing Utility — Exact LLM API cost calculations per provider.
  * Rates based on current official API pricing ($ per 1M tokens):
- * - Claude Haiku 4.5: $0.50 / 1M input, $2.50 / 1M output (~$0.00347/digest)
+ * - Claude Haiku 5.5: $0.50 / 1M input, $2.50 / 1M output (~$0.00347/digest)
  * - Claude Sonnet 5: $1.00 / 1M input, $5.00 / 1M output (~$0.00695/score)
  * - Groq (Llama 3.3 70B): $0.59 / 1M input, $0.79 / 1M output (~$0.00319/digest)
  * - Gemini 1.5 Flash: $0.075 / 1M input, $0.30 / 1M output (~$0.00049/digest)
@@ -10,12 +10,12 @@
 
 export const PROVIDER_RATES = {
   claude: {
-    name: 'Claude Haiku 4.5',
+    name: 'Claude Haiku 5.5',
     inputPerM: 0.50,
     outputPerM: 2.50,
   },
   claudeHaiku: {
-    name: 'Claude Haiku 4.5',
+    name: 'Claude Haiku 5.5',
     inputPerM: 0.50,
     outputPerM: 2.50,
   },
