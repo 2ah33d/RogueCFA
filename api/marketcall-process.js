@@ -381,9 +381,10 @@ export default async function handler(req, res) {
     /* Sanitize entities, tickers, analyst name & attach metadata */
     let digest = extractJSON(llmText);
 
-    if (!digest || !digest.guest) {
-      const errMsg = `LLM returned an unparseable digest.${groqDiagnosticMsg}`;
-      await updateJob(jobId, 'error', null, errMsg);
+    const hasPicksOrMentions = Array.isArray(digest?.picks) || Array.isArray(digest?.top_picks) || Array.isArray(digest?.callerMentions);
+    if (!digest || !digest.guest || !hasPicksOrMentions) {
+      const errMsg = `LLM returned an incomplete digest (missing guest or stock picks).${groqDiagnosticMsg}`;
+      await updateJob(jobId, 'error', cleanedTranscript ? { rawText: cleanedTranscript, error: errMsg } : null, errMsg);
       return res.status(200).json({ jobId, status: 'error', error: errMsg });
     }
 
