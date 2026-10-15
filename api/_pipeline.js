@@ -548,7 +548,6 @@ export async function fetchRssPodcastFallback(groqKey = '', timer, targetDate = 
           /* Enforce date check: match if pubDate or title date equals targetDateStr */
           const matchesTarget = (rssItemDate && rssItemDate === targetDateStr) || (titleDateStr && titleDateStr === targetDateStr) || rssItemTitle.includes(targetDateStr);
           if (!matchesTarget) {
-            console.warn(`[RSS Fallback] Item date (${rssItemDate} / ${titleDateStr}) does not match target date (${targetDateStr}). Skipping.`);
             continue;
           }
           rssItemDate = titleDateStr || rssItemDate || targetDateStr;
@@ -747,12 +746,23 @@ export async function fetchSupabaseStorageAudioFallback(groqKey = '', timer, tar
     formData.append('model', 'whisper-large-v3-turbo');
     formData.append('response_format', 'json');
 
-    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    let res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${groqKey}` },
       body: formData,
       signal: AbortSignal.timeout(90000),
     });
+
+    if (!res.ok && res.status === 400) {
+      /* Fallback to distil-whisper if turbo model string is rejected */
+      formData.set('model', 'distil-whisper-large-v3-en');
+      res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${groqKey}` },
+        body: formData,
+        signal: AbortSignal.timeout(90000),
+      });
+    }
     timer?.end('Groq Whisper Live Audio Transcription');
 
     if (!res.ok) {
@@ -1828,18 +1838,49 @@ Produce the structured digest following the exact JSON format specified. Remembe
 export async function callLLM(provider, key, systemPrompt, userPrompt, timer) {
   timer?.start('LLM synthesis');
   let result;
-  switch (provider) {
-    case 'gemini':
-      result = await callGemini(key, systemPrompt, userPrompt);
-      break;
-    case 'claude':
-      result = await callClaude(key, systemPrompt, userPrompt);
-      break;
-    case 'openai':
-      result = await callOpenAI(key, systemPrompt, userPrompt);
-      break;
-    default:
-      throw new Error(`Unknown provider: ${provider}`);
+  try {
+    switch (provider) {
+      case 'gemini':
+        result = await callGemini(key, systemPrompt, userPrompt);
+        break;
+      case 'claude':
+        result = await callClaude(key, systemPrompt, userPrompt);
+        break;
+      case 'openai':
+        result = await callOpenAI(key, systemPrompt, userPrompt);
+        break;
+      default:
+        throw new Error(`Unknown provider: ${provider}`);
+    }
+  } catch (primaryErr) {
+    console.warn(`[callLLM] Primary provider '${provider}' failed: ${primaryErr.message}. Attempting fallback providers...`);
+
+    // Fallback 1: If primary was Claude or OpenAI, try Gemini if a key is available
+    const geminiKey = process.env.GEMINI_API_KEY || (key && !key.startsWith('sk-ant-') && !key.startsWith('sk-') ? key : null);
+    if (provider !== 'gemini' && geminiKey) {
+      try {
+        console.log('[callLLM] Falling back to Gemini...');
+        result = await callGemini(geminiKey, systemPrompt, userPrompt);
+      } catch (geminiErr) {
+        console.warn('[callLLM] Gemini fallback failed:', geminiErr.message);
+      }
+    }
+
+    // Fallback 2: Try OpenAI if an OpenAI key is available
+    const openaiKey = process.env.OPENAI_API_KEY || (key && key.startsWith('sk-proj-') ? key : null);
+    if (!result && provider !== 'openai' && openaiKey) {
+      try {
+        console.log('[callLLM] Falling back to OpenAI...');
+        result = await callOpenAI(openaiKey, systemPrompt, userPrompt);
+      } catch (openaiErr) {
+        console.warn('[callLLM] OpenAI fallback failed:', openaiErr.message);
+      }
+    }
+
+    if (!result) {
+      timer?.end('LLM synthesis');
+      throw primaryErr;
+    }
   }
   timer?.end('LLM synthesis');
   return result; /* { text: string, usage: { input_tokens, output_tokens } } */
@@ -1887,39 +1928,67 @@ async function callClaude(key, systemPrompt, userPrompt) {
   const models = [
     'claude-haiku-5-5',
     'claude-sonnet-5',
+    'claude-3-5-sonnet-latest',
+    'claude-3-5-haiku-latest',
+    'claude-3-haiku-20240307',
   ];
 
   let lastErr = null;
   for (const model of models) {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-      signal: AbortSignal.timeout(150000),
-    });
+    let response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 8192,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+        }),
+        signal: AbortSignal.timeout(150000),
+      });
+    } catch (netErr) {
+      lastErr = netErr;
+      console.warn(`[callClaude] Network error with model ${model}:`, netErr.message);
+      continue;
+    }
 
     if (response.ok) {
-      const data = await response.json();
-      const textBlock = data.content?.find((b) => b.type === 'text');
-      if (textBlock) {
+      const data = await response.json().catch(() => ({}));
+      const textBlocks = data.content?.filter((b) => b.type === 'text' && typeof b.text === 'string') || [];
+      let fullText = textBlocks.map((b) => b.text).join('\n').trim();
+
+      if (!fullText && Array.isArray(data.content)) {
+        for (const block of data.content) {
+          if (typeof block.text === 'string' && block.text.trim()) {
+            fullText = block.text.trim();
+            break;
+          }
+          if (typeof block.thinking === 'string' && block.thinking.trim() && block.thinking.includes('{')) {
+            fullText = block.thinking.trim();
+            break;
+          }
+        }
+      }
+
+      if (fullText) {
         const usage = data.usage
           ? {
               input_tokens: data.usage.input_tokens || 0,
               output_tokens: data.usage.output_tokens || 0,
             }
           : null;
-        return { text: textBlock.text, usage };
+        return { text: fullText, usage };
       }
-      throw new Error('Claude returned no text content.');
+
+      console.warn(`[callClaude] Model ${model} returned HTTP 200 with no text content. stop_reason: ${data.stop_reason}, block types: ${data.content?.map(c => c.type).join(', ')}`);
+      lastErr = new Error(`Claude model ${model} returned no text content (stop_reason: ${data.stop_reason || 'unknown'})`);
+      continue;
     }
 
     const errBody = await response.json().catch(() => ({}));
@@ -1928,7 +1997,7 @@ async function callClaude(key, systemPrompt, userPrompt) {
       new Error(`Claude API error (${model}): ${detail}`),
       { status: response.status }
     );
-    if (response.status === 404) {
+    if (response.status === 404 || response.status === 400) {
       continue;
     }
     throw lastErr;

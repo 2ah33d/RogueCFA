@@ -131,7 +131,13 @@ export default async function handler(req, res) {
     let rawText = '';
 
     if (provider === 'claude' || provider === 'anthropic' || process.env.ANTHROPIC_API_KEY) {
-      const models = ['claude-haiku-5-5', 'claude-sonnet-5'];
+      const models = [
+        'claude-haiku-5-5',
+        'claude-sonnet-5',
+        'claude-3-5-sonnet-latest',
+        'claude-3-5-haiku-latest',
+        'claude-3-haiku-20240307',
+      ];
       let lastErr = null;
 
       for (const model of models) {
@@ -145,19 +151,33 @@ export default async function handler(req, res) {
             },
             body: JSON.stringify({
               model,
-              max_tokens: 1000,
+              max_tokens: 4096,
               messages: [{ role: 'user', content: prompt }],
             }),
           });
 
           if (response.ok) {
-            const data = await response.json();
-            rawText = data.content?.find((block) => block.type === 'text')?.text ?? '{}';
-            break;
+            const data = await response.json().catch(() => ({}));
+            const textBlocks = data.content?.filter((b) => b.type === 'text' && typeof b.text === 'string') || [];
+            let extracted = textBlocks.map((b) => b.text).join('\n').trim();
+            if (!extracted && Array.isArray(data.content)) {
+              for (const block of data.content) {
+                if (typeof block.text === 'string' && block.text.trim()) {
+                  extracted = block.text.trim();
+                  break;
+                }
+              }
+            }
+            if (extracted) {
+              rawText = extracted;
+              break;
+            }
+            lastErr = new Error(`Claude model ${model} returned no text content`);
+            continue;
           } else {
             const errText = await response.text();
             lastErr = new Error(`Claude API (${model}) returned HTTP ${response.status}: ${errText.slice(0, 150)}`);
-            if (response.status === 404) continue;
+            if (response.status === 404 || response.status === 400) continue;
             throw lastErr;
           }
         } catch (e) {

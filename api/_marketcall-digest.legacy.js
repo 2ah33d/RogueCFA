@@ -824,8 +824,11 @@ async function callGemini(key, systemPrompt, userPrompt) {
 
 async function callClaude(key, systemPrompt, userPrompt) {
   const models = [
+    'claude-haiku-5-5',
     'claude-sonnet-5',
-    'claude-haiku-5-5'
+    'claude-3-5-sonnet-latest',
+    'claude-3-5-haiku-latest',
+    'claude-3-haiku-20240307',
   ];
 
   let lastErr = null;

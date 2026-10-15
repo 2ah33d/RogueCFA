@@ -187,35 +187,44 @@ export default async function handler(req, res) {
       }
     }
 
-    /* ── Priority 0: Check if a saved raw transcript exists in Supabase for this episode_date (bypassed on force/renew) ── */
-    if (!force && !req.body?.bypassCache) {
+    /* ── Priority 0: Check if a saved raw transcript exists in Supabase for this episode_date ── */
+    if (!req.body?.bypassTranscriptCache && !req.body?.forceReTranscribe) {
       try {
-        const { data: savedJob } = await supabase
+        const { data: savedJobs } = await supabase
           .from('digest_jobs')
-          .select('result, video_title')
+          .select('id, result, video_title')
           .eq('episode_date', targetDateStr)
           .not('result', 'is', null)
           .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(5);
 
-        const existingRawText = savedJob?.result?.rawText || savedJob?.result?.raw_text || savedJob?.result?.text;
-        if (existingRawText && existingRawText.length >= 200) {
+        let existingRawText = null;
+        let matchedJob = null;
+        for (const j of (savedJobs || [])) {
+          const raw = j?.result?.rawText || j?.result?.raw_text || j?.result?.text;
+          if (raw && raw.length >= 200) {
+            existingRawText = raw;
+            matchedJob = j;
+            break;
+          }
+        }
+
+        if (existingRawText) {
           const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
-          const savedTitle = savedJob?.video_title || savedJob?.result?.videoTitle || '';
+          const savedTitle = matchedJob?.video_title || matchedJob?.result?.videoTitle || '';
           const savedDate = parseDateFromTitle(savedTitle);
           const savedVideoMatchesDate = savedDate === targetDateStr;
 
-          const resolvedVideoId = matchingYtVid?.videoId || (savedVideoMatchesDate ? savedJob?.result?.videoId : '') || '';
+          const resolvedVideoId = matchingYtVid?.videoId || (savedVideoMatchesDate ? matchedJob?.result?.videoId : '') || '';
           const resolvedVideoTitle = matchingYtVid?.videoTitle || (savedVideoMatchesDate ? savedTitle : `BNN Bloomberg Market Call (Live Audio Capture - ${targetDateStr})`);
-          const resolvedDescription = matchingYtVid?.description || (savedVideoMatchesDate ? savedJob?.result?.description : '') || '';
+          const resolvedDescription = matchingYtVid?.description || (savedVideoMatchesDate ? matchedJob?.result?.description : '') || '';
 
           selectedVideo = {
             videoId: resolvedVideoId,
             videoTitle: resolvedVideoTitle,
             description: resolvedDescription,
             episodeDate: targetDateStr,
-            source: 'database_transcript_cache',
+            source: matchedJob?.result?.source || 'database_transcript_cache',
             youtubePending: !resolvedVideoId,
           };
           cleanedTranscript = cleanRawTranscript(existingRawText);
@@ -226,33 +235,12 @@ export default async function handler(req, res) {
       }
     }
 
-    /* ── Priority 1: Official BNN Market Call Podcast RSS Feed + Groq Whisper ── */
+    /* ── Priority 1: Stitched Live Capture Audio from Supabase Storage + Groq Whisper ── */
+    // If today's live capture was recorded & uploaded to Supabase Storage, this is the authoritative primary audio!
     if ((!selectedVideo || !cleanedTranscript) && groqKey && groqKey.startsWith('gsk_')) {
-      timer.start('Groq Whisper RSS pipeline');
-      const rssResult = await fetchRssPodcastFallback(groqKey, timer, targetDateStr);
-      timer.end('Groq Whisper RSS pipeline');
-
-      if (rssResult && rssResult.text && rssResult.text.length >= 200) {
-        const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
-        selectedVideo = {
-          videoId: matchingYtVid?.videoId || '',
-          videoTitle: matchingYtVid?.videoTitle || rssResult.rssItemTitle || `BNN Bloomberg Market Call (Live Audio Capture - ${targetDateStr})`,
-          description: matchingYtVid?.description || '',
-          episodeDate: rssResult.rssItemDate || targetDateStr,
-          source: 'bnn_rss_podcast',
-          youtubePending: !matchingYtVid?.videoId,
-        };
-        cleanedTranscript = cleanRawTranscript(rssResult.text);
-      } else if (rssResult && rssResult.groqDiagnostic) {
-        groqDiagnosticMsg = ` [DIAGNOSTIC: Groq Whisper MP3 transcription issue: ${rssResult.groqDiagnostic}]`;
-      }
-    }
-
-    /* ── Priority 1.5: Stitched Live Capture Audio from Supabase Storage + Groq Whisper ── */
-    if ((!selectedVideo || !cleanedTranscript) && groqKey && groqKey.startsWith('gsk_')) {
-      timer.start('Supabase Storage audio fallback');
+      timer.start('Supabase Storage audio lookup');
       const storageAudioResult = await fetchSupabaseStorageAudioFallback(groqKey, timer, targetDateStr);
-      timer.end('Supabase Storage audio fallback');
+      timer.end('Supabase Storage audio lookup');
 
       if (storageAudioResult && storageAudioResult.text && storageAudioResult.text.length >= 200) {
         const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
@@ -265,6 +253,37 @@ export default async function handler(req, res) {
           youtubePending: !matchingYtVid?.videoId,
         };
         cleanedTranscript = cleanRawTranscript(storageAudioResult.text);
+
+        /* Immediately persist raw transcript to database to protect against downstream LLM timeouts/retries */
+        await persistTranscriptCache(supabase, targetDateStr, jobId, cleanedTranscript, selectedVideo);
+      } else if (storageAudioResult && storageAudioResult.groqDiagnostic) {
+        groqDiagnosticMsg = ` [DIAGNOSTIC: Groq Whisper Supabase audio transcription issue: ${storageAudioResult.groqDiagnostic}]`;
+      }
+    }
+
+    /* ── Priority 2: Official BNN Market Call Podcast RSS Feed + Groq Whisper ── */
+    // Used when live capture audio is not in Supabase Storage (e.g. past episodes or missed live capture)
+    if ((!selectedVideo || !cleanedTranscript) && groqKey && groqKey.startsWith('gsk_')) {
+      timer.start('Groq Whisper RSS pipeline');
+      const rssResult = await fetchRssPodcastFallback(groqKey, timer, targetDateStr);
+      timer.end('Groq Whisper RSS pipeline');
+
+      if (rssResult && rssResult.text && rssResult.text.length >= 200) {
+        const matchingYtVid = findMatchingYtVideo(candidateVideos, targetDateStr);
+        selectedVideo = {
+          videoId: matchingYtVid?.videoId || '',
+          videoTitle: matchingYtVid?.videoTitle || rssResult.rssItemTitle || `BNN Bloomberg Market Call (Podcast Audio - ${targetDateStr})`,
+          description: matchingYtVid?.description || '',
+          episodeDate: rssResult.rssItemDate || targetDateStr,
+          source: 'bnn_rss_podcast',
+          youtubePending: !matchingYtVid?.videoId,
+        };
+        cleanedTranscript = cleanRawTranscript(rssResult.text);
+
+        /* Immediately persist raw transcript to database */
+        await persistTranscriptCache(supabase, targetDateStr, jobId, cleanedTranscript, selectedVideo);
+      } else if (rssResult && rssResult.groqDiagnostic) {
+        groqDiagnosticMsg = ` [DIAGNOSTIC: Groq Whisper MP3 transcription issue: ${rssResult.groqDiagnostic}]`;
       }
     }
 
@@ -532,7 +551,15 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('[marketcall-process] Pipeline error:', error);
     const errMsg = `Pipeline failed: ${error.message}`;
-    await updateJob(jobId, 'error', null, errMsg);
+    const preservedResult = cleanedTranscript ? {
+      rawText: cleanedTranscript,
+      videoTitle: selectedVideo?.videoTitle || `BNN Bloomberg Market Call (${targetDateStr})`,
+      videoId: selectedVideo?.videoId || '',
+      episodeDate: targetDateStr,
+      source: selectedVideo?.source || 'audio_capture',
+      error: errMsg,
+    } : null;
+    await updateJob(jobId, 'error', preservedResult, errMsg);
     return res.status(200).json({ jobId, status: 'error', error: errMsg, rawResponse: error.rawText });
   }
 }
@@ -540,6 +567,44 @@ export default async function handler(req, res) {
 /* ════════════════════════════════════════════════════════════════
    Supabase job state helpers
    ════════════════════════════════════════════════════════════════ */
+
+async function persistTranscriptCache(supabaseClient, dateStr, currentJobId, transcript, videoInfo) {
+  try {
+    const rawResult = {
+      rawText: transcript,
+      videoTitle: videoInfo?.videoTitle || `BNN Bloomberg Market Call (Live Audio Capture - ${dateStr})`,
+      videoId: videoInfo?.videoId || '',
+      episodeDate: dateStr,
+      source: videoInfo?.source || 'audio_capture',
+      transcribedAt: new Date().toISOString(),
+    };
+
+    // 1. Update current job with the transcript immediately
+    await supabaseClient
+      .from('digest_jobs')
+      .update({
+        current_stage: 'Transcribed — synthesizing LLM digest',
+        result: rawResult,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', currentJobId);
+
+    // 2. Also ensure audio-DATE row stores rawText so it is never purged by status cleanup
+    await supabaseClient
+      .from('digest_jobs')
+      .upsert({
+        id: `audio-${dateStr}`,
+        episode_date: dateStr,
+        status: 'audio_transcribed',
+        result: rawResult,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+
+    console.log(`[marketcall-process] Persisted transcript cache for ${dateStr} (${transcript.length} chars)`);
+  } catch (err) {
+    console.warn('[marketcall-process] Failed to persist transcript cache:', err.message);
+  }
+}
 
 async function updateJob(jobId, status, result, errorMessage, videoId, videoTitle) {
   try {

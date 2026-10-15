@@ -106,8 +106,9 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           episodeDate: todayStr,
           jobId: `live-${todayStr}`,
+          audioUrl: targetAudioUrl,
           groqKey: process.env.CRON_GROQ_KEY || process.env.GROQ_API_KEY || '',
-          llmKey: process.env.CRON_LLM_KEY || process.env.LLM_KEY || '',
+          llmKey: process.env.CRON_LLM_KEY || process.env.ANTHROPIC_API_KEY || process.env.LLM_KEY || process.env.GEMINI_API_KEY || '',
           provider: process.env.CRON_LLM_PROVIDER || process.env.LLM_PROVIDER || 'claude',
           force: true,
         }),
