@@ -9,12 +9,37 @@ import { handleAdminAuthRequest } from './_adminAuth.js';
    Also handles admin authentication routes to stay within Vercel Hobby serverless limits.
    ════════════════════════════════════════════════════════════════ */
 
-const memoryStats = {
-  allTimeVisitors: new Set(),
-  totalViews: 0,
-  uniqueDaily: new Set(),
-  lastResetDate: new Date().toISOString().slice(0, 10),
-};
+const TELEMETRY_ROW_ID = 'telemetry_site_traffic';
+
+async function getOrInitTelemetry() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  let telemetry = {
+    totalViews: 0,
+    totalVisitors: 0,
+    visitors: [],
+    todayMap: {},
+  };
+
+  try {
+    const { data: row } = await supabase
+      .from('digest_jobs')
+      .select('id, result')
+      .eq('id', TELEMETRY_ROW_ID)
+      .maybeSingle();
+
+    if (row && row.result) {
+      telemetry = row.result;
+    }
+  } catch (err) {
+    console.warn('[api/traffic] Failed to fetch telemetry from digest_jobs:', err.message);
+  }
+
+  if (!Array.isArray(telemetry.visitors)) telemetry.visitors = [];
+  if (!telemetry.todayMap || typeof telemetry.todayMap !== 'object') telemetry.todayMap = {};
+  if (!Array.isArray(telemetry.todayMap[todayStr])) telemetry.todayMap[todayStr] = [];
+
+  return { telemetry, todayStr };
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -26,104 +51,101 @@ export default async function handler(req, res) {
   }
 
   // Handle admin auth routing to save a serverless function slot on Vercel Hobby plan
-  if (req.query.action === 'auth' || req.body?.action === 'auth' || (req.method === 'POST' && typeof req.body?.password === 'string')) {
+  if (req.query?.action === 'auth' || req.body?.action === 'auth' || (req.method === 'POST' && typeof req.body?.password === 'string')) {
     return handleAdminAuthRequest(req, res);
   }
 
-  const todayStr = new Date().toISOString().slice(0, 10);
-
-  // Reset daily unique cache if date changed
-  if (memoryStats.lastResetDate !== todayStr) {
-    memoryStats.uniqueDaily.clear();
-    memoryStats.lastResetDate = todayStr;
-  }
-
   if (req.method === 'POST') {
-    const { vid, isNewVisitor } = req.body || {};
+    const { vid, isNewSession = false } = req.body || {};
     const visitorKey = (typeof vid === 'string' && vid.length > 5)
-      ? vid
+      ? vid.trim()
       : (req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'anon');
 
-    memoryStats.totalViews += 1;
-    memoryStats.uniqueDaily.add(visitorKey);
-    memoryStats.allTimeVisitors.add(visitorKey);
+    const { telemetry, todayStr } = await getOrInitTelemetry();
+    let hasChanged = false;
 
-    let dbTotalVisitors = memoryStats.allTimeVisitors.size;
-    let dbTotalViews = memoryStats.totalViews;
-
-    // Persist real count to Supabase if configured
-    try {
-      if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        const { data: allTimeRow } = await supabase
-          .from('site_traffic')
-          .select('id, page_views, unique_visitors')
-          .eq('metric_date', '1970-01-01')
-          .maybeSingle();
-
-        if (allTimeRow) {
-          const newViews = (allTimeRow.page_views || 0) + 1;
-          const newVisitors = (allTimeRow.unique_visitors || 0) + (isNewVisitor ? 1 : 0);
-          await supabase
-            .from('site_traffic')
-            .update({
-              page_views: newViews,
-              unique_visitors: newVisitors,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('metric_date', '1970-01-01');
-          dbTotalViews = newViews;
-          dbTotalVisitors = Math.max(1, newVisitors);
-        } else {
-          await supabase.from('site_traffic').insert([
-            {
-              metric_date: '1970-01-01',
-              page_views: 1,
-              unique_visitors: 1,
-              created_at: new Date().toISOString(),
-            },
-          ]);
-          dbTotalViews = 1;
-          dbTotalVisitors = 1;
-        }
-      }
-    } catch {
-      // Fallback to memory count
+    // Check unique visitor
+    if (visitorKey && visitorKey !== 'anon' && !telemetry.visitors.includes(visitorKey)) {
+      telemetry.visitors.push(visitorKey);
+      telemetry.totalVisitors = telemetry.visitors.length;
+      hasChanged = true;
     }
+
+    // Check today unique
+    if (visitorKey && visitorKey !== 'anon' && !telemetry.todayMap[todayStr].includes(visitorKey)) {
+      telemetry.todayMap[todayStr].push(visitorKey);
+      hasChanged = true;
+    }
+
+    // Check session view
+    if (isNewSession) {
+      telemetry.totalViews = (telemetry.totalViews || 0) + 1;
+      hasChanged = true;
+    }
+
+    // Keep minimum sane counts
+    telemetry.totalVisitors = Math.max(telemetry.totalVisitors, telemetry.visitors.length, 1);
+    telemetry.totalViews = Math.max(telemetry.totalViews, telemetry.totalVisitors, 1);
+
+    if (hasChanged) {
+      try {
+        await supabase
+          .from('digest_jobs')
+          .upsert({
+            id: TELEMETRY_ROW_ID,
+            episode_date: '1970-01-01',
+            status: 'telemetry',
+            result: telemetry,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id' });
+      } catch (err) {
+        console.warn('[api/traffic] Failed to persist telemetry upsert:', err.message);
+      }
+    }
+
+    const todayCount = Array.isArray(telemetry.todayMap[todayStr]) ? telemetry.todayMap[todayStr].length : 1;
 
     return res.status(200).json({
       status: 'success',
-      totalVisitors: Math.max(1, dbTotalVisitors),
-      todayVisitors: Math.max(1, memoryStats.uniqueDaily.size),
-      totalViews: Math.max(1, dbTotalViews),
+      totalVisitors: telemetry.totalVisitors,
+      todayVisitors: Math.max(1, todayCount),
+      totalViews: telemetry.totalViews,
     });
   }
 
   if (req.method === 'GET') {
-    let totalVisitors = Math.max(1, memoryStats.allTimeVisitors.size);
-    let totalViews = Math.max(1, memoryStats.totalViews);
-    let todayVisitors = Math.max(1, memoryStats.uniqueDaily.size);
+    const queryVid = typeof req.query.vid === 'string' ? req.query.vid.trim() : null;
+    const { telemetry, todayStr } = await getOrInitTelemetry();
 
-    try {
-      if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        const { data: allTimeRow } = await supabase
-          .from('site_traffic')
-          .select('page_views, unique_visitors')
-          .eq('metric_date', '1970-01-01')
-          .maybeSingle();
-
-        if (allTimeRow) {
-          totalViews = Math.max(totalViews, allTimeRow.page_views || 1);
-          totalVisitors = Math.max(totalVisitors, allTimeRow.unique_visitors || 1);
-        }
+    if (queryVid && queryVid.length > 5 && !telemetry.visitors.includes(queryVid)) {
+      telemetry.visitors.push(queryVid);
+      telemetry.totalVisitors = telemetry.visitors.length;
+      if (!telemetry.todayMap[todayStr].includes(queryVid)) {
+        telemetry.todayMap[todayStr].push(queryVid);
       }
-    } catch {
-      // Memory fallback
+      telemetry.totalViews = Math.max(telemetry.totalViews, telemetry.totalVisitors);
+      try {
+        await supabase
+          .from('digest_jobs')
+          .upsert({
+            id: TELEMETRY_ROW_ID,
+            episode_date: '1970-01-01',
+            status: 'telemetry',
+            result: telemetry,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id' });
+      } catch (err) {
+        console.warn('[api/traffic] Failed to persist GET telemetry:', err.message);
+      }
     }
 
+    const todayCount = Array.isArray(telemetry.todayMap[todayStr]) ? telemetry.todayMap[todayStr].length : 1;
+
     return res.status(200).json({
-      totalVisitors,
-      totalViews,
-      todayVisitors,
+      status: 'success',
+      totalVisitors: Math.max(1, telemetry.totalVisitors),
+      todayVisitors: Math.max(1, todayCount),
+      totalViews: Math.max(1, telemetry.totalViews),
     });
   }
 

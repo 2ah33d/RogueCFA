@@ -1465,6 +1465,7 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
       {/* Golden Goose & Multi-Analyst Convergence Panel */}
       <GoldenGoosePanel
         episodes={effectiveEpisodes}
+        isAdmin={isAdmin}
         onScoreTicker={onScoreTicker}
         onSelectGuest={onSelectGuest}
         onRefreshEpisodes={handleRefreshHistory}

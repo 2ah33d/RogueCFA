@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 /**
  * useTraffic — Privacy-preserving visitor tracking hook.
@@ -13,52 +13,29 @@ export function useTraffic() {
     loading: true,
   });
 
-  useEffect(() => {
-    let isMounted = true;
-
-    // Persistent anonymous visitor ID
-    let vid = null;
-    let isNewVisitor = false;
+  const getVid = useCallback(() => {
     try {
-      vid = localStorage.getItem('roguefa_vid');
+      let vid = localStorage.getItem('roguefa_vid');
       if (!vid) {
-        vid = 'v_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+        vid = 'v_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
         localStorage.setItem('roguefa_vid', vid);
-        isNewVisitor = true;
       }
+      return vid;
     } catch {
-      vid = 'anon';
+      return 'anon';
     }
+  }, []);
 
-    // Session tracking so page reloads don't duplicate views within the same session
-    const sessionKey = 'roguefa_session_tracked';
-    let isNewSession = false;
-    try {
-      isNewSession = !sessionStorage.getItem(sessionKey);
-    } catch {
-      isNewSession = true;
-    }
-
-    const method = isNewSession ? 'POST' : 'GET';
-    const options = {
-      method,
+  const pingServer = useCallback((isNewSession = false) => {
+    const vid = getVid();
+    return fetch('/api/traffic', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-    };
-    if (isNewSession) {
-      options.body = JSON.stringify({ vid, isNewVisitor });
-    }
-
-    fetch('/api/traffic', options)
+      body: JSON.stringify({ vid, isNewSession }),
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!isMounted || !data) return;
-        if (isNewSession) {
-          try {
-            sessionStorage.setItem(sessionKey, '1');
-          } catch {
-            /* ignore */
-          }
-        }
+        if (!data) return;
         setStats({
           totalVisitors: data.totalVisitors ?? 1,
           todayVisitors: data.todayVisitors ?? 1,
@@ -67,15 +44,44 @@ export function useTraffic() {
         });
       })
       .catch(() => {
-        if (isMounted) {
-          setStats((prev) => ({ ...prev, loading: false }));
-        }
+        setStats((prev) => ({ ...prev, loading: false }));
       });
+  }, [getVid]);
+
+  useEffect(() => {
+    const sessionKey = 'roguefa_session_tracked';
+    let isNewSession = false;
+    try {
+      isNewSession = !sessionStorage.getItem(sessionKey);
+      if (isNewSession) {
+        sessionStorage.setItem(sessionKey, '1');
+      }
+    } catch {
+      isNewSession = true;
+    }
+
+    // Initial ping on mount
+    pingServer(isNewSession);
+
+    // Re-check traffic when window regains focus (e.g. switching back from friend's chat)
+    const onFocus = () => {
+      pingServer(false);
+    };
+    window.addEventListener('focus', onFocus);
+
+    // Periodic poll every 45s while active
+    const interval = setInterval(() => {
+      pingServer(false);
+    }, 45000);
 
     return () => {
-      isMounted = false;
+      window.removeEventListener('focus', onFocus);
+      clearInterval(interval);
     };
-  }, []);
+  }, [pingServer]);
 
-  return stats;
+  return {
+    ...stats,
+    refresh: () => pingServer(false),
+  };
 }

@@ -967,6 +967,8 @@ export const KNOWN_BNN_ANALYSTS = [
   { name: 'Michael O\'Brien', firm: 'TD Asset Management' },
   { name: 'Les Stelmach', firm: 'Franklin Templeton' },
   { name: 'Ryan Bushell', firm: 'Newhaven Asset Management' },
+  { name: 'Richard Orrell', firm: 'RN Croft Financial Group', aliases: ['Richard Arell', 'Richard Orrel'] },
+  { name: 'Chris Blumas', firm: 'Raymond James', aliases: ['Chris Blumis'] },
 ];
 
 /**
@@ -1072,12 +1074,13 @@ export function matchKnownAnalyst(heardName, heardFirm = '', extraDbAnalysts = [
 
     // Rule B: Firm name corroboration
     if (heardFirm && analyst.firm) {
-      const hFirmLower = heardFirm.toLowerCase();
-      const aFirmLower = analyst.firm.toLowerCase();
+      const hFirmLower = heardFirm.toLowerCase().replace(/[\.,\-]/g, '');
+      const aFirmLower = analyst.firm.toLowerCase().replace(/[\.,\-]/g, '');
       const firmMatches = hFirmLower.includes(aFirmLower) || aFirmLower.includes(hFirmLower) ||
         (hFirmLower.includes('first avenue') && aFirmLower.includes('first avenue')) ||
         (hFirmLower.includes('black swan') && aFirmLower.includes('black swan')) ||
-        (hFirmLower.includes('stonecastle') && aFirmLower.includes('stonecastle'));
+        (hFirmLower.includes('stonecastle') && aFirmLower.includes('stonecastle')) ||
+        (hFirmLower.includes('croft') && aFirmLower.includes('croft'));
 
       if (firmMatches && (lastMatches || firstDist <= 2 || fullDist <= 3)) {
         return {
@@ -1197,7 +1200,8 @@ export async function fetchBnnTopPicksAnalyst(targetDate) {
   /* Helper: extract analyst name from a headline like "Christine Poole's Top Picks" or "Jamie Murrays’ Market Outlook" */
   function extractNameFromHeadline(headline) {
     if (!headline || typeof headline !== 'string') return null;
-    const m = headline.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z\-]+)+)(?:['’]s|['’]s?|,|\s*-\s*|\s+on\s+|\s+top\s+|\s+hot\s+|\s+market\s+)/i);
+    const decoded = decodeHTMLEntities(headline);
+    const m = decoded.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z\-]+)+)(?:['’]s|['’]s?|,|\s*-\s*|\s+on\s+|\s+top\s+|\s+hot\s+|\s+market\s+)/i);
     if (m && m[1]) {
       let name = m[1].trim();
       if (name.endsWith('s') && !['Chris', 'James', 'Denis', 'Charles', 'Curtis', 'Travis', 'Lucas', 'Thomas', 'Richards', 'Williams', 'Davis', 'Jones', 'Evans', 'Roberts', 'Andrews', 'Blumas'].includes(name.split(/\s+/).pop())) {
@@ -1227,6 +1231,46 @@ export async function fetchBnnTopPicksAnalyst(targetDate) {
       }
     }
     return false;
+  }
+
+  /* Attempt 0: Official BNN Bloomberg Market Call Show Hub (Fastest, Same-Day Broadcast Authority) */
+  try {
+    const showRes = await fetch('https://www.bnnbloomberg.ca/video/shows/market-call/', {
+      headers: BROWSER_HEADERS,
+      signal: AbortSignal.timeout(4000),
+    });
+    if (showRes.ok) {
+      const html = await showRes.text();
+      if (html.length > 2000 && !html.includes('Access Denied')) {
+        const targetDateSlash = targetDate.replace(/-/g, '/'); // e.g. 2026/10/16
+        const dateMatched = html.includes(targetDate) || html.includes(targetDateSlash);
+        if (dateMatched) {
+          // Check H2 headlines
+          const h2Matches = [...html.matchAll(/<h2[^>]*class="[^"]*headline[^"]*"[^>]*>([\s\S]*?)<\/h2>/gi)];
+          for (const m of h2Matches) {
+            const rawHeadline = decodeHTMLEntities(m[1].replace(/<[^>]+>/g, '').trim());
+            const name = extractNameFromHeadline(rawHeadline);
+            if (name) {
+              console.log(`[fetchBnnTopPicksAnalyst] Found authoritative analyst from BNN Market Call show page: "${name}" for ${targetDate}`);
+              return name;
+            }
+          }
+          // Check description
+          const descMatches = [...html.matchAll(/<p[^>]*class="[^"]*description[^"]*"[^>]*>([\s\S]*?)<\/p>/gi)];
+          for (const m of descMatches) {
+            const rawDesc = decodeHTMLEntities(m[1].replace(/<[^>]+>/g, '').trim());
+            const descName = rawDesc.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z\-]+)+),\s+(?:portfolio manager|analyst|president|chief|senior|managing|wealth advisor)/i);
+            if (descName && descName[1]) {
+              const name = descName[1].trim();
+              console.log(`[fetchBnnTopPicksAnalyst] Found authoritative analyst from BNN Market Call show description: "${name}" for ${targetDate}`);
+              return name;
+            }
+          }
+        }
+      }
+    }
+  } catch (showErr) {
+    console.warn(`[fetchBnnTopPicksAnalyst] BNN show page lookup failed: ${showErr.message}`);
   }
 
   /* Attempt 0: Official BNN Bloomberg Podcast RSS Feed (100% authoritative schedule & verified names) */

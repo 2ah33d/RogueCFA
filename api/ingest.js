@@ -20,6 +20,7 @@ import {
   extractJSON,
   getLatestMarketCallDateStr,
   sanitizeAnalystName,
+  resolveAnalystName,
   sanitizeDigestResult,
   fetchBnnTopPicksAnalyst,
   isCanadianMarketHoliday,
@@ -222,14 +223,30 @@ export default async function handler(req, res) {
 
     /* ── Step 4: Sanitize Entities, Tickers, Analyst Name & Attach Metadata ── */
     digest = sanitizeDigestResult(digest);
-    /* Check BNN Top Picks article for authoritative analyst name (best-effort, 3s timeout) */
+    /* Check BNN Top Picks article / show broadcast page for authoritative analyst name (best-effort, 3s timeout) */
     let bnnArticleGuest = null;
     try {
       bnnArticleGuest = await fetchBnnTopPicksAnalyst(todayStr);
     } catch (bnnErr) {
       console.warn('[api/ingest] BNN Top Picks analyst lookup failed:', bnnErr.message);
     }
-    digest.guest = sanitizeAnalystName(digest.guest, videoTitle, '', bnnArticleGuest, todayStr, digest.firm || '');
+    const resolved = resolveAnalystName(
+      digest.guest,
+      videoTitle,
+      '',
+      bnnArticleGuest,
+      todayStr,
+      digest.firm || ''
+    );
+    digest.guest = resolved.name;
+    digest.nameConfidence = resolved.confidence;
+    if (resolved.disclaimer) {
+      digest.nameDisclaimer = resolved.disclaimer;
+      if (!Array.isArray(digest._warnings)) digest._warnings = [];
+      if (!digest._warnings.includes(resolved.disclaimer)) {
+        digest._warnings.push(resolved.disclaimer);
+      }
+    }
     if (llmUsage) {
       digest.usage = llmUsage;
     }

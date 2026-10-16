@@ -14,12 +14,15 @@ export default function AdminModal({ isOpen, onClose, isAdmin, onLoginSuccess, o
   const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
+    if (isOpen && typeof trafficStats?.refresh === 'function') {
+      trafficStats.refresh();
+    }
     if (!isOpen) {
       setPassword('');
       setError('');
       setSuccessMsg('');
     }
-  }, [isOpen]);
+  }, [isOpen, trafficStats]);
 
   if (!isOpen) return null;
 

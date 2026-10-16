@@ -1,5 +1,17 @@
 import { buildShortlists, buildLLMEyesPrompt, validateLLMEyesResponse } from '../src/lib/goldenGoose.js';
 import { supabase } from './_supabaseClient.js';
+import { verifyAdminToken } from './_adminAuth.js';
+
+function isRequestAuthorized(req) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const secretKey = process.env.API_SECRET || process.env.CRON_SECRET || process.env.ADMIN_PASSWORD;
+
+  if (token && (token === secretKey || token === process.env.CRON_SECRET || token === process.env.ADMIN_PASSWORD)) {
+    return true;
+  }
+  return verifyAdminToken(token);
+}
 
 export default async function handler(req, res) {
   /* ── CORS ── */
@@ -11,6 +23,13 @@ export default async function handler(req, res) {
 
   try {
     const { windowDays = 7, llmKey: bodyKey, provider: bodyProvider, force = false } = req.body || {};
+
+    /* If caller is attempting to force LLM generation without providing their own custom key, require Admin Authorization */
+    if (force && (!bodyKey || !bodyKey.trim()) && !isRequestAuthorized(req)) {
+      return res.status(401).json({
+        error: 'Admin authorization or personal API key required to refresh AI conviction. Public users cannot consume server LLM tokens.',
+      });
+    }
 
     /* Fetch recent episodes from Supabase digest_jobs */
     const cutoffDate = new Date(Date.now() - (windowDays + 2) * 86_400_000).toISOString().split('T')[0];

@@ -22,6 +22,7 @@ import {
   parseDateFromTitle,
   resolveAnalystName,
   sanitizeAnalystName,
+  fetchBnnTopPicksAnalyst,
 } from './_pipeline.js';
 
 function isRequestAuthorized(req) {
@@ -245,6 +246,54 @@ export default async function handler(req, res) {
               }
             } catch (backfillErr) {
               console.warn('[marketcall-digest] YouTube backfill check failed:', backfillErr.message);
+            }
+          /* 3. Re-reconcile analyst name against authoritative BNN broadcast page / database if currently audio_only */
+          if (cached.result && cached.result.digest && (cached.result.digest.nameConfidence === 'audio_only' || !cached.result.digest.nameConfidence)) {
+            try {
+              const bnnGuest = await fetchBnnTopPicksAnalyst(targetDateStr);
+              const resolved = resolveAnalystName(
+                cached.result.digest.guest,
+                cached.result.videoTitle || '',
+                '',
+                bnnGuest,
+                targetDateStr,
+                cached.result.digest.firm || ''
+              );
+              if (resolved.name && (resolved.name !== cached.result.digest.guest || (resolved.confidence !== 'audio_only' && cached.result.digest.nameConfidence === 'audio_only'))) {
+                const oldName = cached.result.digest.guest;
+                cached.result.digest.guest = resolved.name;
+                cached.result.digest.nameConfidence = resolved.confidence;
+                cached.result.digest.nameDisclaimer = resolved.disclaimer;
+                if (Array.isArray(cached.result.digest._warnings)) {
+                  cached.result.digest._warnings = cached.result.digest._warnings.filter((w) => !w.includes('spelling may vary'));
+                }
+
+                /* Persist updated analyst name to Supabase */
+                supabase
+                  .from('digest_jobs')
+                  .update({
+                    result: cached.result,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', cached.id)
+                  .then(({ error }) => {
+                    if (error) console.warn('[marketcall-digest] Failed to persist analyst name upgrade:', error.message);
+                  });
+
+                /* Re-assign track record picks to authoritative analyst name */
+                if (oldName && oldName !== resolved.name) {
+                  supabase
+                    .from('analyst_track_record')
+                    .update({ analyst_name: resolved.name })
+                    .eq('analyst_name', oldName)
+                    .eq('pick_publish_date', targetDateStr)
+                    .then(({ error }) => {
+                      if (error) console.warn('[marketcall-digest] Failed to migrate track record picks to resolved analyst:', error.message);
+                    });
+                }
+              }
+            } catch (reconErr) {
+              console.warn('[marketcall-digest] Analyst re-reconciliation check failed:', reconErr.message);
             }
           }
 

@@ -117,7 +117,7 @@ function AnalystMentionPill({ mention, onSelectGuest }) {
  * @param {Array<Object>} props.episodes - List of MarketCall episodes
  * @param {Function} props.onSelectGuest - (guestName) => void — open guest profile
  */
-export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefreshEpisodes }) {
+export default function GoldenGoosePanel({ episodes = [], isAdmin = false, onSelectGuest, onRefreshEpisodes }) {
   const [showAllShortlists, setShowAllShortlists] = useState(false);
   const [llmResult, setLlmResult] = useState(null);
   const [loadingLLM, setLoadingLLM] = useState(false);
@@ -174,10 +174,14 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
     const { llmKey } = getKeys();
     const provider = getProvider();
 
+    const adminToken = localStorage.getItem('roguefa_admin_token') || '';
+    const headers = { 'Content-Type': 'application/json' };
+    if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+
     try {
       const res = await fetch('/api/goldengoose', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           windowDays: 7,
           llmKey,
@@ -314,23 +318,25 @@ export default function GoldenGoosePanel({ episodes = [], onSelectGuest, onRefre
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 text-xs font-sans flex-wrap">
-            <button
-              type="button"
-              onClick={() => handleGenerateLLMEyes(true)}
-              disabled={loadingLLM}
-              className="px-3.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold disabled:opacity-50 shadow-sm cursor-pointer"
-              title="Evaluate and synthesize candidate shortlists with AI"
-            >
-              {loadingLLM ? (
-                <svg className="w-3.5 h-3.5 animate-spin text-amber-400" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-              ) : (
-                <span>✨</span>
-              )}
-              <span>{loadingLLM ? 'Evaluating...' : 'Refresh AI Conviction'}</span>
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => handleGenerateLLMEyes(true)}
+                disabled={loadingLLM}
+                className="px-3.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold disabled:opacity-50 shadow-sm cursor-pointer"
+                title="Evaluate and synthesize candidate shortlists with AI"
+              >
+                {loadingLLM ? (
+                  <svg className="w-3.5 h-3.5 animate-spin text-amber-400" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                ) : (
+                  <span>✨</span>
+                )}
+                <span>{loadingLLM ? 'Evaluating...' : 'Refresh AI Conviction'}</span>
+              </button>
+            )}
 
             <div className="px-3 py-1.5 bg-surface-elevated/60 border border-edge rounded-xl text-dim flex items-center gap-2">
               <span className="text-amber-400 font-bold">+{displayGoldenPicks.length}</span>

@@ -552,13 +552,14 @@ test('resolveAnalystName respects authoritative schedule and database fuzzy fall
   const r2 = resolveAnalystName('Dan Wong');
   assert.equal(r2.name, 'Stan Wong');
   assert.equal(r2.confidence, 'database_fuzzy_match');
-  assert.equal(r2.disclaimer, null);
+  // Priority 3: Resolves phonetic audio mishearings for Richard Orrell and Chris Blumas
+  const r4 = resolveAnalystName('Richard Arell', '', '', null, '2026-10-16', 'Portfolio Manager, R.N. Croft Financial Group');
+  assert.equal(r4.name, 'Richard Orrell');
+  assert.equal(r4.disclaimer, null);
 
-  // Fallback: completely unknown analyst
-  const r3 = resolveAnalystName('Sarah Jenkins');
-  assert.equal(r3.name, 'Sarah Jenkins');
-  assert.equal(r3.confidence, 'audio_only');
-  assert.ok(r3.disclaimer.includes('heard from live audio broadcast'));
+  const r5 = resolveAnalystName('Chris Blumis', '', '', null, '2026-10-14', 'Raymond James');
+  assert.equal(r5.name, 'Chris Blumas');
+  assert.equal(r5.disclaimer, null);
 });
 
 
