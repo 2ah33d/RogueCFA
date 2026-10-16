@@ -1,30 +1,18 @@
-import crypto from 'crypto';
 import { supabase } from './_supabaseClient.js';
 
 /* ════════════════════════════════════════════════════════════════
    /api/traffic.js
-   Privacy-first, account-free traffic monitoring.
+   Honest, privacy-first, account-free traffic monitoring.
    Zero PII collected: no cookies, no tracking pixels, no raw IPs stored.
-   Daily unique sessions are anonymized via ephemeral daily SHA-256 hash.
+   Counts authentic all-time unique visitors and actual page views.
    ════════════════════════════════════════════════════════════════ */
 
-// In-memory fallback if Supabase table is pending migration
-let memoryStats = {
-  baseOffset: 1240, // Base organic audience
-  totalViews: 4180,
+const memoryStats = {
+  allTimeVisitors: new Set(),
+  totalViews: 0,
   uniqueDaily: new Set(),
   lastResetDate: new Date().toISOString().slice(0, 10),
 };
-
-function getDailyHash(ip, userAgent) {
-  const salt = process.env.API_SECRET || 'roguefa_salt_2026';
-  const today = new Date().toISOString().slice(0, 10);
-  return crypto
-    .createHash('sha256')
-    .update(`${today}:${ip || 'unknown'}:${userAgent || ''}:${salt}`)
-    .digest('hex')
-    .slice(0, 16);
-}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -37,84 +25,92 @@ export default async function handler(req, res) {
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  // Reset in-memory daily count if date rolled over
+  // Reset daily unique cache if date changed
   if (memoryStats.lastResetDate !== todayStr) {
     memoryStats.uniqueDaily.clear();
     memoryStats.lastResetDate = todayStr;
   }
 
   if (req.method === 'POST') {
-    const rawIp =
-      req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-      req.socket?.remoteAddress ||
-      '';
-    const userAgent = req.headers['user-agent'] || '';
-    const hash = getDailyHash(rawIp, userAgent);
+    const { vid, isNewVisitor } = req.body || {};
+    const visitorKey = (typeof vid === 'string' && vid.length > 5)
+      ? vid
+      : (req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'anon');
 
     memoryStats.totalViews += 1;
-    memoryStats.uniqueDaily.add(hash);
+    memoryStats.uniqueDaily.add(visitorKey);
+    memoryStats.allTimeVisitors.add(visitorKey);
 
-    // Attempt persistent Supabase update if table exists
+    let dbTotalVisitors = memoryStats.allTimeVisitors.size;
+    let dbTotalViews = memoryStats.totalViews;
+
+    // Persist real count to Supabase if configured
     try {
       if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        // Increment site_traffic row
-        const { data: existing } = await supabase
+        const { data: allTimeRow } = await supabase
           .from('site_traffic')
-          .select('*')
-          .eq('metric_date', todayStr)
+          .select('id, page_views, unique_visitors')
+          .eq('metric_date', '1970-01-01')
           .maybeSingle();
 
-        if (existing) {
+        if (allTimeRow) {
+          const newViews = (allTimeRow.page_views || 0) + 1;
+          const newVisitors = (allTimeRow.unique_visitors || 0) + (isNewVisitor ? 1 : 0);
           await supabase
             .from('site_traffic')
             .update({
-              page_views: (existing.page_views || 0) + 1,
+              page_views: newViews,
+              unique_visitors: newVisitors,
               updated_at: new Date().toISOString(),
             })
-            .eq('metric_date', todayStr);
+            .eq('metric_date', '1970-01-01');
+          dbTotalViews = newViews;
+          dbTotalVisitors = Math.max(1, newVisitors);
         } else {
           await supabase.from('site_traffic').insert([
             {
-              metric_date: todayStr,
+              metric_date: '1970-01-01',
               page_views: 1,
               unique_visitors: 1,
               created_at: new Date().toISOString(),
             },
           ]);
+          dbTotalViews = 1;
+          dbTotalVisitors = 1;
         }
       }
     } catch {
-      // Graceful fallback to memory stats
+      // Fallback to memory count
     }
 
     return res.status(200).json({
       status: 'success',
-      totalVisitors: memoryStats.baseOffset + memoryStats.uniqueDaily.size,
-      todayVisitors: memoryStats.uniqueDaily.size,
-      totalViews: memoryStats.totalViews,
+      totalVisitors: Math.max(1, dbTotalVisitors),
+      todayVisitors: Math.max(1, memoryStats.uniqueDaily.size),
+      totalViews: Math.max(1, dbTotalViews),
     });
   }
 
   if (req.method === 'GET') {
-    let totalVisitors = memoryStats.baseOffset + memoryStats.uniqueDaily.size;
-    let totalViews = memoryStats.totalViews;
+    let totalVisitors = Math.max(1, memoryStats.allTimeVisitors.size);
+    let totalViews = Math.max(1, memoryStats.totalViews);
     let todayVisitors = Math.max(1, memoryStats.uniqueDaily.size);
 
     try {
       if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-        const { data: rows } = await supabase
+        const { data: allTimeRow } = await supabase
           .from('site_traffic')
-          .select('page_views, unique_visitors');
+          .select('page_views, unique_visitors')
+          .eq('metric_date', '1970-01-01')
+          .maybeSingle();
 
-        if (rows && rows.length > 0) {
-          const dbViews = rows.reduce((sum, r) => sum + (r.page_views || 0), 0);
-          const dbUniques = rows.reduce((sum, r) => sum + (r.unique_visitors || 0), 0);
-          totalViews = Math.max(totalViews, dbViews);
-          totalVisitors = memoryStats.baseOffset + Math.max(dbUniques, memoryStats.uniqueDaily.size);
+        if (allTimeRow) {
+          totalViews = Math.max(totalViews, allTimeRow.page_views || 1);
+          totalVisitors = Math.max(totalVisitors, allTimeRow.unique_visitors || 1);
         }
       }
     } catch {
-      // Return memory stats
+      // Memory fallback
     }
 
     return res.status(200).json({

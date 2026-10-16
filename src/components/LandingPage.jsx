@@ -36,7 +36,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
         <div className="flex items-center justify-center gap-2 text-xs text-dim">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span>
-            Join <strong className="text-prime font-semibold">{trafficStats?.totalVisitors ? trafficStats.totalVisitors.toLocaleString() : '1,240'}+</strong> investors tracking daily broadcast digests
+            <strong className="text-prime font-semibold">{trafficStats?.totalVisitors ? trafficStats.totalVisitors.toLocaleString() : '1'}</strong> all-time unique visitor{trafficStats?.totalVisitors === 1 ? '' : 's'} · Privacy-safe analytics
           </span>
         </div>
 

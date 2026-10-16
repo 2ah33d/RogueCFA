@@ -47,9 +47,13 @@ export default function SettingsPanel({ onClose, onKeysCleared, className = '' }
     setDebugLoading(true);
     setDebugResult(null);
     try {
+      const adminToken = localStorage.getItem('roguefa_admin_token') || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+
       const res = await fetch('/api/marketcall-process', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           youtubeKey,
           llmKey,

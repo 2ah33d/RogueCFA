@@ -359,6 +359,8 @@ export default function App() {
               ) : activeTab === 'digest' ? (
                 <ErrorBoundary fallbackTitle="Latest Picks encountered an issue">
                   <DigestView
+                    isAdmin={isAdmin}
+                    onOpenAdmin={() => setShowAdminModal(true)}
                     onScoreTicker={(ticker, guest) => {
                       setPrefilledTicker(ticker);
                       setPrefilledGuest(guest);

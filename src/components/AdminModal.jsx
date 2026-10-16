@@ -1,104 +1,63 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Lock, ShieldCheck, Activity, Users, Eye, LogOut, KeyRound } from 'lucide-react';
+import { Lock, ShieldCheck, Activity, LogOut, KeyRound } from 'lucide-react';
 
 /**
- * AdminModal — Admin authentication & control center.
- * Allows owner to set up admin login/password, sign in to unlock full site controls,
- * and view live anonymous traffic analytics.
+ * AdminModal — Secure backend-verified admin authentication & control center.
+ * Password is authenticated strictly by /api/admin-auth against ADMIN_PASSWORD.
+ * Zero hardcoded passwords or public credential editing in client bundles.
  */
 export default function AdminModal({ isOpen, onClose, isAdmin, onLoginSuccess, onLogout, trafficStats }) {
-  const [tab, setTab] = useState('login'); // 'login' | 'setup'
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [newUsername, setNewUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Load configured admin credentials from localStorage
-  const getStoredCreds = () => {
-    try {
-      const creds = localStorage.getItem('roguefa_admin_creds');
-      return creds ? JSON.parse(creds) : null;
-    } catch {
-      return null;
-    }
-  };
-
   useEffect(() => {
     if (!isOpen) {
+      setPassword('');
       setError('');
       setSuccessMsg('');
-    } else {
-      const creds = getStoredCreds();
-      if (!creds) {
-        setTab('setup');
-      }
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
-    const stored = getStoredCreds();
+    setLoading(true);
 
-    // Default master password if not yet configured: 'admin' / 'roguefa2026'
-    const validUser = stored ? stored.username : 'admin';
-    const validPass = stored ? stored.password : 'roguefa2026';
+    try {
+      const res = await fetch('/api/admin-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
 
-    if (username.trim().toLowerCase() === validUser.toLowerCase() && password === validPass) {
-      localStorage.setItem('roguefa_admin_session', 'active_' + Date.now());
-      onLoginSuccess();
-      setSuccessMsg('Authenticated successfully as Admin!');
-      setTimeout(() => {
-        onClose();
-      }, 700);
-    } else {
-      setError('Invalid username or password. Default setup: admin / roguefa2026 (or click "Configure Credentials" below).');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Authentication failed');
+      }
+
+      if (data.token) {
+        localStorage.setItem('roguefa_admin_token', data.token);
+        localStorage.setItem('roguefa_admin_session', 'active_' + Date.now());
+        setSuccessMsg('Admin access verified!');
+        onLoginSuccess();
+        setTimeout(() => {
+          onClose();
+        }, 700);
+      }
+    } catch (err) {
+      setError(err.message || 'Incorrect admin password.');
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const handleSaveCredentials = (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccessMsg('');
-
-    if (!newUsername.trim() || !newPassword) {
-      setError('Please provide both username and password.');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      setError('Password should be at least 6 characters long.');
-      return;
-    }
-
-    const newCreds = {
-      username: newUsername.trim(),
-      password: newPassword,
-      updatedAt: new Date().toISOString(),
-    };
-
-    localStorage.setItem('roguefa_admin_creds', JSON.stringify(newCreds));
-    localStorage.setItem('roguefa_admin_session', 'active_' + Date.now());
-    setSuccessMsg('Admin credentials saved & session activated!');
-    onLoginSuccess();
-
-    setTimeout(() => {
-      onClose();
-    }, 1000);
   };
 
   const handleLogoutClick = () => {
+    localStorage.removeItem('roguefa_admin_token');
     localStorage.removeItem('roguefa_admin_session');
     onLogout();
     setSuccessMsg('Logged out of Admin mode.');
@@ -131,14 +90,14 @@ export default function AdminModal({ isOpen, onClose, isAdmin, onLoginSuccess, o
                 {isAdmin ? 'Admin Console' : 'Admin Login'}
               </h3>
               <p className="text-xs text-dim">
-                {isAdmin ? 'Full Site & Infrastructure Mode Active' : 'Sign in to access full site controls'}
+                {isAdmin ? 'Full Site & Token Management Active' : 'Sign in to access admin triggers & renew tools'}
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-7 h-7 flex items-center justify-center rounded-full text-dim hover:text-prime hover:bg-surface-elevated transition-colors"
+            className="w-7 h-7 flex items-center justify-center rounded-full text-dim hover:text-prime hover:bg-surface-elevated transition-colors cursor-pointer"
           >
             ✕
           </button>
@@ -153,83 +112,57 @@ export default function AdminModal({ isOpen, onClose, isAdmin, onLoginSuccess, o
                 <div className="flex items-center gap-3">
                   <ShieldCheck className="w-5 h-5 text-signal-buy shrink-0" />
                   <div>
-                    <span className="text-xs font-semibold text-prime block">Admin Access Granted</span>
-                    <span className="text-[11px] text-dim">You have unlocked the full site and admin triggers.</span>
+                    <span className="text-xs font-semibold text-prime block">Admin Mode Active</span>
+                    <span className="text-[11px] text-dim">Full site unlocked (Renew digest, token generation, dev settings).</span>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={handleLogoutClick}
-                  className="px-3 py-1.5 bg-surface-card hover:bg-danger/20 hover:text-danger text-dim rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+                  className="px-3 py-1.5 bg-surface-card hover:bg-danger/20 hover:text-danger text-dim rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>Log Out</span>
                 </button>
               </div>
 
-              {/* Traffic Telemetry Card */}
+              {/* Real Traffic Telemetry Card */}
               <div className="p-4 bg-surface-elevated rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-prime flex items-center gap-2">
                     <Activity className="w-3.5 h-3.5 text-accent" />
-                    Live Traffic &amp; Audience Stats
+                    Verified Audience Telemetry
                   </span>
                   <span className="text-[10px] text-dim font-medium bg-surface-card px-2 py-0.5 rounded-full">
-                    Zero-PII Privacy Safe
+                    Actual Real Counts
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 pt-1 text-center">
-                  <div className="p-2.5 bg-surface-card rounded-lg">
-                    <span className="text-[10px] text-dim block">Total Visitors</span>
-                    <span className="text-base font-bold text-prime tabular-nums">
-                      {trafficStats?.totalVisitors?.toLocaleString() || '1,240'}
+                <div className="grid grid-cols-2 gap-2 pt-1 text-center">
+                  <div className="p-3 bg-surface-card rounded-lg">
+                    <span className="text-[10px] text-dim block">All-Time Unique Visitors</span>
+                    <span className="text-xl font-bold text-prime tabular-nums">
+                      {trafficStats?.totalVisitors ? trafficStats.totalVisitors.toLocaleString() : '1'}
                     </span>
                   </div>
-                  <div className="p-2.5 bg-surface-card rounded-lg">
-                    <span className="text-[10px] text-dim block">Today Active</span>
-                    <span className="text-base font-bold text-signal-buy tabular-nums">
-                      +{trafficStats?.todayVisitors?.toLocaleString() || '32'}
-                    </span>
-                  </div>
-                  <div className="p-2.5 bg-surface-card rounded-lg">
-                    <span className="text-[10px] text-dim block">Total Views</span>
-                    <span className="text-base font-bold text-accent tabular-nums">
-                      {trafficStats?.totalViews?.toLocaleString() || '4,180'}
+                  <div className="p-3 bg-surface-card rounded-lg">
+                    <span className="text-[10px] text-dim block">Total Page Views</span>
+                    <span className="text-xl font-bold text-accent tabular-nums">
+                      {trafficStats?.totalViews ? trafficStats.totalViews.toLocaleString() : '1'}
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Credential update trigger */}
-              <button
-                type="button"
-                onClick={() => setTab(tab === 'setup' ? 'login' : 'setup')}
-                className="w-full text-xs text-dim hover:text-prime text-center transition-colors flex items-center justify-center gap-1.5 py-1"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                <span>{tab === 'setup' ? 'Close Credential Manager' : 'Update Admin Login / Password'}</span>
-              </button>
+              <div className="p-3.5 bg-surface-elevated/50 rounded-xl text-[11px] text-dim leading-relaxed border border-edge/30">
+                <div className="flex items-center gap-1.5 text-prime font-medium mb-1">
+                  <KeyRound className="w-3 h-3 text-accent" />
+                  <span>Password Security</span>
+                </div>
+                To change your admin password, edit <code className="text-accent bg-surface-card px-1 py-0.5 rounded">ADMIN_PASSWORD</code> in your local <code className="text-prime font-semibold">.env.local</code> file or Vercel Environment Variables.
+              </div>
             </div>
           ) : (
-            <>
-              {/* Tab Selector: Login vs Setup */}
-              <div className="flex bg-surface-elevated p-1 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => { setTab('login'); setError(''); setSuccessMsg(''); }}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${tab === 'login' ? 'bg-surface-card text-prime shadow-sm' : 'text-dim hover:text-prime'}`}
-                >
-                  Admin Sign In
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setTab('setup'); setError(''); setSuccessMsg(''); }}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${tab === 'setup' ? 'bg-surface-card text-prime shadow-sm' : 'text-dim hover:text-prime'}`}
-                >
-                  Configure Credentials
-                </button>
-              </div>
-
+            <div className="space-y-4">
               {/* Status & Error Alerts */}
               {error && (
                 <div className="p-3 bg-danger/15 text-danger rounded-xl text-xs leading-relaxed border border-danger/25">
@@ -243,87 +176,33 @@ export default function AdminModal({ isOpen, onClose, isAdmin, onLoginSuccess, o
               )}
 
               {/* Login Form */}
-              {tab === 'login' ? (
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div>
-                    <label className="text-xs font-medium text-dim block mb-1">Admin Username</label>
-                    <input
-                      type="text"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="e.g. admin"
-                      className="w-full bg-surface-elevated px-3.5 py-2.5 rounded-xl text-sm text-prime placeholder:text-dim/50 border border-edge/40 focus:outline-hidden focus:border-accent"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-dim block mb-1">Password</label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full bg-surface-elevated px-3.5 py-2.5 rounded-xl text-sm text-prime placeholder:text-dim/50 border border-edge/40 focus:outline-hidden focus:border-accent"
-                      required
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full py-3 bg-accent text-accent-text hover:bg-accent-hover text-sm font-semibold rounded-xl transition-all shadow-antigravity mt-2"
-                  >
-                    Unlock Full Site
-                  </button>
-                  <p className="text-[11px] text-dim/70 text-center">
-                    Default: <span className="font-mono text-prime">admin</span> / <span className="font-mono text-prime">roguefa2026</span>
-                  </p>
-                </form>
-              ) : null}
-            </>
-          )}
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="text-xs font-medium text-dim block mb-1">Admin Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password configured in .env.local"
+                    className="w-full bg-surface-elevated px-3.5 py-2.5 rounded-xl text-sm text-prime placeholder:text-dim/50 border border-edge/40 focus:outline-hidden focus:border-accent"
+                    required
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-accent text-accent-text hover:bg-accent-hover text-sm font-semibold rounded-xl transition-all shadow-antigravity mt-2 disabled:opacity-50 cursor-pointer"
+                >
+                  {loading ? 'Verifying...' : 'Unlock Admin Mode'}
+                </button>
+              </form>
 
-          {/* Setup / Update Credentials Form */}
-          {tab === 'setup' && (
-            <form onSubmit={handleSaveCredentials} className="space-y-3.5 pt-1">
-              <div>
-                <label className="text-xs font-medium text-dim block mb-1">Set Admin Username</label>
-                <input
-                  type="text"
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value)}
-                  placeholder="e.g. zaheed or admin"
-                  className="w-full bg-surface-elevated px-3.5 py-2.5 rounded-xl text-sm text-prime placeholder:text-dim/50 border border-edge/40 focus:outline-hidden focus:border-accent"
-                  required
-                />
+              <div className="p-3.5 bg-surface-elevated/40 rounded-xl text-[11px] text-dim leading-relaxed border border-edge/30">
+                <span className="text-prime font-medium block mb-0.5">Where is the password set?</span>
+                Configured securely in your private <code className="text-accent bg-surface-card px-1 py-0.5 rounded">.env.local</code> file under <code className="text-prime font-semibold">ADMIN_PASSWORD</code>. Not modifiable from the public web.
               </div>
-              <div>
-                <label className="text-xs font-medium text-dim block mb-1">New Password</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="w-full bg-surface-elevated px-3.5 py-2.5 rounded-xl text-sm text-prime placeholder:text-dim/50 border border-edge/40 focus:outline-hidden focus:border-accent"
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-dim block mb-1">Confirm Password</label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Re-type password"
-                  className="w-full bg-surface-elevated px-3.5 py-2.5 rounded-xl text-sm text-prime placeholder:text-dim/50 border border-edge/40 focus:outline-hidden focus:border-accent"
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-3 bg-signal-buy text-surface hover:opacity-95 text-sm font-bold rounded-xl transition-all shadow-antigravity mt-2"
-              >
-                Save Credentials &amp; Activate
-              </button>
-            </form>
+            </div>
           )}
         </div>
       </motion.div>

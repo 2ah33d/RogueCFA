@@ -12,6 +12,7 @@
    ════════════════════════════════════════════════════════════════ */
 
 import { supabase } from './_supabaseClient.js';
+import { verifyAdminToken } from './admin-auth.js';
 import {
   createTimer,
   findRecentMarketCallVideos,
@@ -34,6 +35,17 @@ import {
   detectBroadcastDateMismatch,
   isCanadianMarketHoliday,
 } from './_pipeline.js';
+
+function isRequestAuthorized(req) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const secretKey = process.env.API_SECRET || process.env.CRON_SECRET || process.env.ADMIN_PASSWORD;
+
+  if (token && (token === secretKey || token === process.env.CRON_SECRET || token === process.env.ADMIN_PASSWORD)) {
+    return true;
+  }
+  return verifyAdminToken(token);
+}
 
 export const config = { maxDuration: 300 };
 
@@ -73,6 +85,15 @@ export default async function handler(req, res) {
   } else {
     /* ── Standard or Debug Client Invocation (POST) ── */
     const body = req.body || {};
+    const isAuthorized = isRequestAuthorized(req);
+    const isDebugSecret = body.debugSecret && body.debugSecret === process.env.DEBUG_SECRET;
+
+    if (!isAuthorized && !isDebugSecret) {
+      return res.status(401).json({
+        error: 'Unauthorized: Admin privileges required to process broadcasts and consume LLM tokens.',
+      });
+    }
+
     youtubeKey = body.youtubeKey || process.env.CRON_YOUTUBE_KEY || process.env.VITE_YOUTUBE_KEY || process.env.YOUTUBE_KEY || '';
     groqKey = body.groqKey || process.env.CRON_GROQ_KEY || process.env.VITE_GROQ_KEY || process.env.GROQ_KEY || '';
 
@@ -86,7 +107,7 @@ export default async function handler(req, res) {
         : (process.env.CRON_LLM_KEY || process.env.LLM_KEY || process.env.OPENAI_API_KEY || '');
     }
 
-    if (body.debugSecret && body.debugSecret === process.env.DEBUG_SECRET) {
+    if (isDebugSecret) {
       isDebug = true;
     }
   }

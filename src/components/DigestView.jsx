@@ -98,7 +98,7 @@ export function formatDigestToMarkdown(digest, videoInfo) {
  * @param {Function} props.onSelectGuest - (guestName) => void — opens GuestModal
  * @param {Function} props.onOpenSettings - () => void — opens settings panel
  */
-export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSettings }) {
+export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker, onSelectGuest, onOpenSettings }) {
   const todayStr = new Date().toISOString().split('T')[0];
   const [digest, setDigest] = useState(null);
   const [videoInfo, setVideoInfo] = useState(null);
@@ -275,9 +275,13 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     setIsCheckingVideo(true);
     try {
       const youtubeKey = getYoutubeKey();
+      const adminToken = localStorage.getItem('roguefa_admin_token') || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+
       const res = await fetch('/api/marketcall-digest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           episodeDate: targetDate,
           youtubeKey,
@@ -313,6 +317,12 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
   };
 
   const fetchDigest = useCallback(async (force = false, targetDate = null) => {
+    /* Token Guard: Generating/renewing uncached digests consumes LLM tokens and is restricted to Admin */
+    if (force && !isAdmin) {
+      if (onOpenAdmin) onOpenAdmin();
+      return;
+    }
+
     const youtubeKey = getYoutubeKey();
     const groqKey = getGroqKey();
     const { llmKey } = getKeys();
@@ -329,9 +339,13 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
         payload.episodeDate = targetDate;
       }
 
+      const adminToken = localStorage.getItem('roguefa_admin_token') || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+
       const res = await fetch('/api/marketcall-digest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
 
@@ -345,16 +359,24 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
         throw new Error(`API returned non-JSON response (${res.status}): ${parseErr.message}`);
       }
 
+      if (data.status === 'not_published') {
+        setError({
+          type: 'not_published',
+          message: data.message || `No broadcast digest has been published for ${targetDate || todayStr} yet.`,
+        });
+        return;
+      }
+
       /* ── Async flow: API returned a job ID — kick off the processor ── */
       if (data.status === 'processing' && data.jobId) {
         setActiveJobId(data.jobId);
         setPollingElapsed(0);
         isPollingTrans = true;
 
-        /* Fire-and-forget: kick off the heavy processing endpoint. */
+        /* Fire-and-forget: kick off the heavy processing endpoint (Admin only). */
         fetch('/api/marketcall-process', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ ...payload, jobId: data.jobId }),
         }).catch(() => {
           /* Ignore — if this fails, the polling will detect 'not_found' or timeout */
@@ -396,7 +418,7 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
         setHasAttempted(true);
       }
     }
-  }, [todayStr]);
+  }, [todayStr, isAdmin, onOpenAdmin]);
 
   /** Shared handler for when a digest is received (from direct response or polling) */
   const handleDigestReceived = useCallback((data) => {
@@ -553,8 +575,8 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     setDigest(null);
     const activeDate = forcedDate || videoInfo?.episodeDate || selectedDate;
     const target = (activeDate && activeDate !== todayStr) ? activeDate : null;
-    fetchDigest(true, target);
-  }, [fetchDigest, videoInfo?.episodeDate, selectedDate, todayStr]);
+    fetchDigest(isAdmin ? true : false, target);
+  }, [fetchDigest, videoInfo?.episodeDate, selectedDate, todayStr, isAdmin]);
 
   /* Try to get track record for the guest */
   const trackRecord = digest?.guest ? getGuestTrackRecord(digest.guest) : null;
@@ -647,7 +669,35 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
     return (
       <div className="w-full max-w-2xl mx-auto">
         <div className="bg-surface-card border border-edge rounded-2xl p-8 text-center">
-          {error.type === 'no_key' ? (
+          {error.type === 'not_published' ? (
+            <>
+              <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-accent/15 flex items-center justify-center text-accent">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-prime mb-2">Digest Pending Publication</h3>
+              <p className="text-xs text-dim max-w-md mx-auto leading-relaxed mb-5">
+                {error.message || "This episode digest has not been published yet. Check back soon or view earlier episodes from the archive."}
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleBackToLastSaved}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-accent text-accent-text text-xs font-semibold rounded-full shadow-antigravity hover:bg-accent-hover transition-all cursor-pointer"
+                >
+                  View Last Published Digest
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenAdmin}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-surface-elevated text-dim hover:text-prime text-xs font-semibold rounded-full shadow-antigravity transition-all cursor-pointer"
+                >
+                  Admin Sign In
+                </button>
+              </div>
+            </>
+          ) : error.type === 'no_key' ? (
             <>
               <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-signal-watch/10 border border-signal-watch/30
                               flex items-center justify-center font-sans font-bold text-lg text-signal-watch">
@@ -912,45 +962,72 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
                 Broadcast Audio Ready for {selectedDate || todayStr}
               </h3>
               <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
-                Live broadcast audio is stored in your rolling 5-day window. Click below to transcribe with Groq Whisper and generate a structured digest for this episode.
+                {isAdmin
+                  ? "Live broadcast audio is stored in your rolling 5-day window. Click below to transcribe with Groq Whisper and generate a structured digest for this episode."
+                  : "Live broadcast audio has been captured and is pending publication. Public visitors can view published digests below."}
               </p>
             </div>
           ) : (
             <div className="space-y-1.5">
               <h3 className="text-xl font-bold text-prime">
-                {isUnsavedDate ? `Digest for ${selectedDate} is not saved yet` : 'Daily Broadcast Digest'}
+                {isUnsavedDate ? `Digest for ${selectedDate} is not published yet` : 'Daily Broadcast Digest'}
               </h3>
               <p className="text-xs text-dim max-w-md mx-auto leading-relaxed">
                 {isUnsavedDate
-                  ? `No saved broadcast digest was found for ${selectedDate}. Click below if you would like to generate it.`
-                  : "Click below to fetch and summarize today's public broadcast stream with Groq Whisper & AI."}
+                  ? (isAdmin
+                    ? `No saved broadcast digest was found for ${selectedDate}. Click below to generate it.`
+                    : `No published broadcast digest was found for ${selectedDate}. Browse existing episodes in the archive.`)
+                  : (isAdmin
+                    ? "Click below to fetch and summarize today's public broadcast stream with Groq Whisper & AI."
+                    : "Today's Market Call digest is pending publication. Public visitors can view published digests below.")}
               </p>
             </div>
           )}
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => fetchDigest(false, selectedDate || todayStr)}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-accent-text text-xs font-semibold rounded-full shadow-antigravity hover:bg-accent-hover transition-all cursor-pointer"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span>
-                {availableAudioDates.includes(selectedDate || todayStr)
-                  ? `Generate Digest for ${selectedDate || todayStr}`
-                  : isUnsavedDate
-                    ? 'Click to Generate Digest'
-                    : "Check Newer / Generate Today's Digest"}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="inline-flex items-center gap-2 px-5 py-3 bg-surface-elevated text-dim hover:text-prime text-xs font-semibold rounded-full shadow-antigravity transition-all cursor-pointer"
-            >
-              Open Settings
-            </button>
+            {isAdmin ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => fetchDigest(true, selectedDate || todayStr)}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-accent-text text-xs font-semibold rounded-full shadow-antigravity hover:bg-accent-hover transition-all cursor-pointer"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  <span>
+                    {availableAudioDates.includes(selectedDate || todayStr)
+                      ? `Generate Digest for ${selectedDate || todayStr}`
+                      : isUnsavedDate
+                        ? 'Click to Generate Digest'
+                        : "Check Newer / Generate Today's Digest"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="inline-flex items-center gap-2 px-5 py-3 bg-surface-elevated text-dim hover:text-prime text-xs font-semibold rounded-full shadow-antigravity transition-all cursor-pointer"
+                >
+                  Open Settings
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleBackToLastSaved}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-accent-text text-xs font-semibold rounded-full shadow-antigravity hover:bg-accent-hover transition-all cursor-pointer"
+                >
+                  <span>View Latest Published Digest</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenAdmin}
+                  className="inline-flex items-center gap-2 px-5 py-3 bg-surface-elevated text-dim hover:text-prime text-xs font-semibold rounded-full shadow-antigravity transition-all cursor-pointer"
+                >
+                  Admin Sign In
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -984,6 +1061,10 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
   };
 
   const handleRenewDigest = () => {
+    if (!isAdmin) {
+      if (onOpenAdmin) onOpenAdmin();
+      return;
+    }
     const epDate = videoInfo?.episodeDate || selectedDate || todayStr;
     saveDigestCache(epDate, null);
     saveDigestCache('latest_marketcall', null);
@@ -1153,18 +1234,20 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
               </span>
             </button>
 
-            {/* Renew / Re-generate Digest Button */}
-            <button
-              type="button"
-              onClick={handleRenewDigest}
-              className="h-8 px-3.5 inline-flex items-center gap-2 bg-surface-card hover:bg-surface-elevated rounded-full text-xs font-medium text-prime shadow-antigravity transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer shrink-0 group"
-              title="Re-generate a fresh AI digest for this episode"
-            >
-              <svg className="w-3.5 h-3.5 text-dim group-hover:text-prime shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              <span className="font-semibold text-prime">Renew Digest</span>
-            </button>
+            {/* Renew / Re-generate Digest Button (Admin Only) */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleRenewDigest}
+                className="h-8 px-3.5 inline-flex items-center gap-2 bg-surface-card hover:bg-surface-elevated rounded-full text-xs font-medium text-prime shadow-antigravity transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer shrink-0 group"
+                title="Re-generate a fresh AI digest for this episode"
+              >
+                <svg className="w-3.5 h-3.5 text-dim group-hover:text-prime shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span className="font-semibold text-prime">Renew Digest</span>
+              </button>
+            )}
 
             {/* Copy All Summary Button */}
             <button
@@ -1266,25 +1349,35 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedDate(newerAudioDate);
-              setDigest(null);
-              setVideoInfo({
-                videoId: '',
-                videoTitle: `BNN Bloomberg MarketCall (${newerAudioDate})`,
-                episodeDate: newerAudioDate,
-              });
-              fetchDigest(false, newerAudioDate);
-            }}
-            className="px-4 py-2 bg-accent text-accent-text text-xs font-semibold rounded-full hover:bg-accent-hover transition-all cursor-pointer shadow-sm shrink-0 flex items-center gap-2"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            <span>Generate {newerAudioDate}</span>
-          </button>
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDate(newerAudioDate);
+                setDigest(null);
+                setVideoInfo({
+                  videoId: '',
+                  videoTitle: `BNN Bloomberg MarketCall (${newerAudioDate})`,
+                  episodeDate: newerAudioDate,
+                });
+                fetchDigest(true, newerAudioDate);
+              }}
+              className="px-4 py-2 bg-accent text-accent-text text-xs font-semibold rounded-full hover:bg-accent-hover transition-all cursor-pointer shadow-sm shrink-0 flex items-center gap-2"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span>Generate {newerAudioDate}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenAdmin}
+              className="px-3.5 py-1.5 bg-surface-elevated text-dim hover:text-prime text-xs font-medium rounded-full transition-all cursor-pointer shadow-sm shrink-0 flex items-center gap-1.5"
+            >
+              <span>Admin Sign In to Publish</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -1305,17 +1398,19 @@ export default function DigestView({ onScoreTicker, onSelectGuest, onOpenSetting
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleRenewDigest}
-            className="px-3.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 border border-amber-500/30 flex items-center gap-1.5"
-            title="Force re-fetch clean broadcast audio from RSS"
-          >
-            <svg className="w-3.5 h-3.5 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            <span>Re-sync from RSS</span>
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleRenewDigest}
+              className="px-3.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-semibold rounded-xl transition-all cursor-pointer shrink-0 border border-amber-500/30 flex items-center gap-1.5"
+              title="Force re-fetch clean broadcast audio from RSS"
+            >
+              <svg className="w-3.5 h-3.5 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>Re-sync from RSS</span>
+            </button>
+          )}
         </div>
       )}
 

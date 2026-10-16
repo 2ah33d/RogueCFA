@@ -9,6 +9,7 @@
    ════════════════════════════════════════════════════════════════ */
 
 import { supabase } from './_supabaseClient.js';
+import { verifyAdminToken } from './admin-auth.js';
 import {
   createTimer,
   cleanRawTranscript,
@@ -22,6 +23,17 @@ import {
   resolveAnalystName,
   sanitizeAnalystName,
 } from './_pipeline.js';
+
+function isRequestAuthorized(req) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const secretKey = process.env.API_SECRET || process.env.CRON_SECRET || process.env.ADMIN_PASSWORD;
+
+  if (token && (token === secretKey || token === process.env.CRON_SECRET || token === process.env.ADMIN_PASSWORD)) {
+    return true;
+  }
+  return verifyAdminToken(token);
+}
 
 export const config = { maxDuration: 60 };
 
@@ -40,7 +52,7 @@ export default async function handler(req, res) {
   /* ── CORS ── */
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -129,6 +141,9 @@ export default async function handler(req, res) {
        (Bypassed if user explicitly clicked 'Renew' with force: true)
        ══════════════════════════════════════════ */
     const { force, bypassCache } = req.body || {};
+    const isAuth = isRequestAuthorized(req);
+    const effectiveForce = isAuth && Boolean(force || bypassCache);
+
     const rawDate = req.body?.episodeDate || clientEpisodeDate;
     const targetDateStr = (rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate))
       ? rawDate
@@ -141,7 +156,7 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!force && !bypassCache) {
+    if (!effectiveForce) {
       try {
         const { data: cached } = await supabase
           .from('digest_jobs')
@@ -251,6 +266,14 @@ export default async function handler(req, res) {
       }
     }
 
+    /* Public visitors are strictly view-only: prevent unauthorized pipeline job creation */
+    if (!isAuth) {
+      return res.status(200).json({
+        status: 'not_published',
+        message: `No broadcast digest has been published for ${targetDateStr} yet. Pipeline processing is restricted to administrators.`,
+      });
+    }
+
     /* ══════════════════════════════════════════
        Standard path: Create job row and return jobId.
        The CLIENT will fire /api/marketcall-process separately.
@@ -262,10 +285,10 @@ export default async function handler(req, res) {
       });
     }
 
-    const jobId = (force || bypassCache) ? `renew-${targetDateStr}-${Date.now()}` : generateJobId(targetDateStr);
+    const jobId = effectiveForce ? `renew-${targetDateStr}-${Date.now()}` : generateJobId(targetDateStr);
 
     /* Check if there's already an active job for targetDateStr (skip if force refresh) */
-    if (!force && !bypassCache) {
+    if (!effectiveForce) {
       try {
         const { data: existingJob } = await supabase
           .from('digest_jobs')

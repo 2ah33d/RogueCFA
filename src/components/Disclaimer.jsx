@@ -32,7 +32,7 @@ export default function Disclaimer({ onOpenAdmin, trafficStats, className = '' }
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
             <span>
-              {trafficStats?.totalVisitors ? `${trafficStats.totalVisitors.toLocaleString()}+ active investors tracking broadcast digests` : 'Privacy-safe automated analytics'}
+              {trafficStats?.totalVisitors ? `${trafficStats.totalVisitors.toLocaleString()} all-time unique visitor${trafficStats.totalVisitors === 1 ? '' : 's'}` : 'Privacy-safe automated analytics'}
             </span>
           </div>
 
