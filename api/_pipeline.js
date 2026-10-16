@@ -140,12 +140,11 @@ export async function findRecentMarketCallVideos(youtubeKey, timer) {
           const videoId = item.snippet?.resourceId?.videoId;
           if (videoId && !candidateMap.has(videoId)) {
             const extractedDate = parseDateFromTitle(rawTitle);
-            const pubDate = item.snippet.publishedAt ? item.snippet.publishedAt.split('T')[0] : '';
             candidateMap.set(videoId, {
               videoId,
               videoTitle: rawTitle,
-              episodeDate: extractedDate || pubDate || '',
-              publishDate: extractedDate || pubDate || '',
+              episodeDate: extractedDate || '',
+              publishDate: extractedDate || '',
               description: desc,
             });
           }
@@ -191,12 +190,11 @@ export async function findRecentMarketCallVideos(youtubeKey, timer) {
           const videoId = v.id?.videoId;
           if (videoId && !candidateMap.has(videoId)) {
             const extractedDate = parseDateFromTitle(rawTitle);
-            const pubDate = v.snippet.publishedAt ? v.snippet.publishedAt.split('T')[0] : '';
             candidateMap.set(videoId, {
               videoId,
               videoTitle: rawTitle,
-              episodeDate: extractedDate || pubDate || '',
-              publishDate: extractedDate || pubDate || '',
+              episodeDate: extractedDate || '',
+              publishDate: extractedDate || '',
               description: desc,
             });
           }
@@ -211,22 +209,67 @@ export async function findRecentMarketCallVideos(youtubeKey, timer) {
 
 /**
  * Extract YYYY-MM-DD date string from video or article title (e.g., "Sept. 11, 2026" → "2026-09-11").
+ * Supports ISO (2026-10-15), numeric slash (10/15/2026), full month with year, and month+day without year.
  */
-export function parseDateFromTitle(title) {
-  if (!title) return null;
+export function parseDateFromTitle(title, referenceYear = null) {
+  if (!title || typeof title !== 'string') return null;
+
+  // 1. ISO format (YYYY-MM-DD)
+  const isoMatch = title.match(/\b(202[0-9])-(0[1-9]|1[0-2])-([0-3][0-9])\b/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  // 2. Numeric slash/dash format (MM/DD/YYYY or M/D/YYYY)
+  const slashMatch = title.match(/\b(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12][0-9]|3[01])[\/\-](202[0-9])\b/);
+  if (slashMatch) {
+    const month = slashMatch[1].padStart(2, '0');
+    const day = slashMatch[2].padStart(2, '0');
+    const year = slashMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
   const monthMap = {
     january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
     july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
     jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sept: '09', sep: '09', oct: '10', nov: '11', dec: '12',
   };
-  const match = title.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\.?\s+([0-9]{1,2}),?\s+([0-9]{4})/i);
-  if (match) {
-    const mStr = match[1].toLowerCase();
+
+  const monthNames = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec';
+
+  // 3. Month Day, Year (e.g., "October 15, 2026", "Oct. 15th, 2026")
+  const mDayYear = new RegExp(`(${monthNames})\\.?\\s+([0-9]{1,2})(?:st|nd|rd|th)?,?\\s+([0-9]{4})`, 'i');
+  const match1 = title.match(mDayYear);
+  if (match1) {
+    const mStr = match1[1].toLowerCase();
     const month = monthMap[mStr] || '01';
-    const day = match[2].padStart(2, '0');
-    const year = match[3];
+    const day = match1[2].padStart(2, '0');
+    const year = match1[3];
     return `${year}-${month}-${day}`;
   }
+
+  // 4. Day Month Year (e.g. "15th of October, 2026", "15 October 2026")
+  const dMonthYear = new RegExp(`([0-9]{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNames})\\.?\\s+([0-9]{4})`, 'i');
+  const match2 = title.match(dMonthYear);
+  if (match2) {
+    const day = match2[1].padStart(2, '0');
+    const mStr = match2[2].toLowerCase();
+    const month = monthMap[mStr] || '01';
+    const year = match2[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // 5. Month Day without Year (e.g., "Market Call for Thursday, October 15", "Market Call: Oct 15")
+  const mDayNoYear = new RegExp(`(?:market\\s+call[\\s\\-:]+)?(?:for\\s+)?(?:monday|tuesday|wednesday|thursday|friday)?,?\\s*(${monthNames})\\.?\\s+([0-9]{1,2})(?:st|nd|rd|th)?\\b`, 'i');
+  const match3 = title.match(mDayNoYear);
+  if (match3) {
+    const mStr = match3[1].toLowerCase();
+    const month = monthMap[mStr] || '01';
+    const day = match3[2].padStart(2, '0');
+    const year = referenceYear ? String(referenceYear) : String(new Date().getUTCFullYear());
+    return `${year}-${month}-${day}`;
+  }
+
   return null;
 }
 
@@ -344,11 +387,13 @@ export function detectBroadcastDateMismatch(targetDateStr, { transcript = '', ti
 export function findMatchingYtVideo(candidateVideos, targetDateStr) {
   if (!Array.isArray(candidateVideos) || candidateVideos.length === 0 || !targetDateStr) return null;
 
+  const refYear = targetDateStr.slice(0, 4);
+
   const normalized = candidateVideos.map((v) => {
     if (!v || !v.videoId) return null;
     const title = v.videoTitle || v.title || '';
-    const extractedDate = parseDateFromTitle(title);
-    const descDate = parseDateFromTitle(v.description || '');
+    const extractedDate = parseDateFromTitle(title, refYear);
+    const descDate = parseDateFromTitle(v.description || '', refYear);
     return {
       videoId: v.videoId,
       videoTitle: title,

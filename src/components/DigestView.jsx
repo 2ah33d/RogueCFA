@@ -90,6 +90,28 @@ export function formatDigestToMarkdown(digest, videoInfo) {
 }
 
 /**
+ * Extract YYYY-MM-DD date from video or article title with strict validation.
+ */
+function parseDateFromTitle(title) {
+  if (!title || typeof title !== 'string') return null;
+  const isoMatch = title.match(/\b(202[0-9])-(0[1-9]|1[0-2])-([0-3][0-9])\b/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  const slashMatch = title.match(/\b(0?[1-9]|1[0-2])[\/\-](0?[1-9]|[12][0-9]|3[01])[\/\-](202[0-9])\b/);
+  if (slashMatch) return `${slashMatch[3]}-${slashMatch[1].padStart(2, '0')}-${slashMatch[2].padStart(2, '0')}`;
+  const monthMap = {
+    january: '01', february: '02', march: '03', april: '04', may: '05', june: '06',
+    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
+    jan: '01', feb: '02', mar: '03', apr: '04', jun: '06', jul: '07', aug: '08', sept: '09', sep: '09', oct: '10', nov: '11', dec: '12',
+  };
+  const monthNames = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec';
+  const m1 = title.match(new RegExp(`(${monthNames})\\.?\\s+([0-9]{1,2})(?:st|nd|rd|th)?,?\\s+([0-9]{4})`, 'i'));
+  if (m1) return `${m1[3]}-${monthMap[m1[1].toLowerCase()] || '01'}-${m1[2].padStart(2, '0')}`;
+  const m2 = title.match(new RegExp(`(?:market\\s+call[\\s\\-:]+)?(?:for\\s+)?(?:monday|tuesday|wednesday|thursday|friday)?,?\\s*(${monthNames})\\.?\\s+([0-9]{1,2})(?:st|nd|rd|th)?\\b`, 'i'));
+  if (m2) return `${new Date().getUTCFullYear()}-${monthMap[m2[1].toLowerCase()] || '01'}-${m2[2].padStart(2, '0')}`;
+  return null;
+}
+
+/**
  * DigestView — Main "Today's Picks" tab content.
  * Fetches & displays the daily MarketCall digest.
  *
@@ -247,16 +269,33 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
             }
           }
 
-          /* If DB has updated videoId for the active episode, sync it */
-          const activeDate = cached?.episodeDate || newestValid?.episodeDate;
-          if (activeDate) {
-            const matchingDBRow = data.history.find((h) => h.episodeDate === activeDate);
-            if (matchingDBRow && (videoInfo?.videoId || '') !== (matchingDBRow.videoId || '')) {
-              setVideoInfo((prev) => ({
-                ...prev,
-                videoId: matchingDBRow.videoId || '',
-                videoTitle: matchingDBRow.videoTitle || prev?.videoTitle,
-              }));
+          /* If DB has updated videoId for the active episode, sync it strictly */
+          const currentViewingDate = isStaleOrMissing
+            ? newestValid.episodeDate
+            : (selectedDate || newestValid?.episodeDate || todayStr);
+
+          if (currentViewingDate) {
+            const matchingDBRow = data.history.find((h) => h.episodeDate === currentViewingDate);
+            if (matchingDBRow) {
+              const rowTitleDate = parseDateFromTitle(matchingDBRow.videoTitle || '');
+              const isStrictMatch = !matchingDBRow.videoId || !rowTitleDate || rowTitleDate === currentViewingDate;
+              const safeVideoId = isStrictMatch ? (matchingDBRow.videoId || '') : '';
+
+              setVideoInfo((prev) => {
+                if (prev && prev.episodeDate && prev.episodeDate !== currentViewingDate) {
+                  return {
+                    videoId: safeVideoId,
+                    videoTitle: matchingDBRow.videoTitle || `BNN Bloomberg MarketCall (${currentViewingDate})`,
+                    episodeDate: currentViewingDate,
+                  };
+                }
+                return {
+                  ...prev,
+                  videoId: safeVideoId,
+                  videoTitle: matchingDBRow.videoTitle || prev?.videoTitle,
+                  episodeDate: currentViewingDate,
+                };
+              });
             }
           }
         }
@@ -1276,62 +1315,71 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
         </div>
 
         {/* Video Preview Column — Soft floating shadow */}
-        {videoInfo?.videoId ? (
-          <div className="flex items-center gap-3.5 bg-surface-card p-3 rounded-2xl shadow-antigravity shrink-0">
-            <a
-              href={`https://www.youtube.com/watch?v=${videoInfo.videoId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-36 h-20 rounded-xl overflow-hidden shadow-md shadow-black/30 border-0 relative group block shrink-0 transition-all duration-300"
-              title={videoInfo?.videoTitle || 'Watch Full Episode'}
-            >
-              <img
-                src={`https://img.youtube.com/vi/${videoInfo.videoId}/mqdefault.jpg`}
-                alt="Episode thumbnail"
-                className="w-full h-full object-cover scale-105 group-hover:scale-110 transition-transform duration-300"
-              />
-              <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors" />
-            </a>
-            <div className="flex flex-col gap-1 pr-1 max-w-[170px]">
-              <span className="text-[10px] uppercase tracking-wider font-semibold text-dim">Full Broadcast</span>
+        {(() => {
+          const hasVideo = Boolean(videoInfo?.videoId);
+          const titleDate = videoInfo?.videoTitle ? parseDateFromTitle(videoInfo.videoTitle) : null;
+          const currentViewingDate = videoInfo?.episodeDate || selectedDate || todayStr;
+          // Strictly reject video if its title date explicitly contradicts the current viewing date!
+          const isDateMismatched = Boolean(titleDate && titleDate !== currentViewingDate);
+          const isValidVideo = hasVideo && !isDateMismatched;
+
+          return isValidVideo ? (
+            <div className="flex items-center gap-3.5 bg-surface-card p-3 rounded-2xl shadow-antigravity shrink-0">
               <a
                 href={`https://www.youtube.com/watch?v=${videoInfo.videoId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-semibold text-prime hover:text-white transition-colors flex items-center gap-1 leading-snug line-clamp-2"
+                className="w-36 h-20 rounded-xl overflow-hidden shadow-md shadow-black/30 border-0 relative group block shrink-0 transition-all duration-300"
+                title={videoInfo?.videoTitle || 'Watch Full Episode'}
               >
-                Watch Episode ↗
+                <img
+                  src={`https://img.youtube.com/vi/${videoInfo.videoId}/mqdefault.jpg`}
+                  alt="Episode thumbnail"
+                  className="w-full h-full object-cover scale-105 group-hover:scale-110 transition-transform duration-300"
+                />
+                <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors" />
               </a>
+              <div className="flex flex-col gap-1 pr-1 max-w-[170px]">
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-dim">Full Broadcast</span>
+                <a
+                  href={`https://www.youtube.com/watch?v=${videoInfo.videoId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-prime hover:text-white transition-colors flex items-center gap-1 leading-snug line-clamp-2"
+                >
+                  Watch Episode ↗
+                </a>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3.5 bg-surface-card p-3 rounded-2xl shadow-antigravity shrink-0">
-            <div className="w-36 h-20 rounded-xl bg-surface-elevated/70 border border-dashed border-edge/60 flex flex-col items-center justify-center text-dim/60 shrink-0 p-2 text-center">
-              <svg className="w-5 h-5 text-faint mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <span className="text-[10px] text-sky-400 font-semibold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
-                Audio Captured
-              </span>
+          ) : (
+            <div className="flex items-center gap-3.5 bg-surface-card p-3 rounded-2xl shadow-antigravity shrink-0">
+              <div className="w-36 h-20 rounded-xl bg-surface-elevated/70 border border-dashed border-edge/60 flex flex-col items-center justify-center text-dim/60 shrink-0 p-2 text-center">
+                <svg className="w-5 h-5 text-faint mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span className="text-[10px] text-sky-400 font-semibold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                  Audio Captured
+                </span>
+              </div>
+              <div className="flex flex-col gap-1 pr-1 max-w-[170px]">
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-dim">Full Broadcast</span>
+                <span className="text-xs font-medium text-dim/90 leading-snug">
+                  YouTube Pending
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCheckVideo}
+                  disabled={isCheckingVideo}
+                  className="text-[11px] text-accent hover:text-accent-hover font-medium flex items-center gap-1 cursor-pointer transition-colors text-left"
+                  title="Check if BNN Bloomberg uploaded today's video to YouTube"
+                >
+                  {isCheckingVideo ? 'Checking...' : 'Check YouTube ↻'}
+                </button>
+              </div>
             </div>
-            <div className="flex flex-col gap-1 pr-1 max-w-[170px]">
-              <span className="text-[10px] uppercase tracking-wider font-semibold text-dim">Full Broadcast</span>
-              <span className="text-xs font-medium text-dim/90 leading-snug">
-                YouTube Pending
-              </span>
-              <button
-                type="button"
-                onClick={handleCheckVideo}
-                disabled={isCheckingVideo}
-                className="text-[11px] text-accent hover:text-accent-hover font-medium flex items-center gap-1 cursor-pointer transition-colors text-left"
-                title="Check if BNN Bloomberg uploaded today's video to YouTube"
-              >
-                {isCheckingVideo ? 'Checking...' : 'Check YouTube ↻'}
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Fresh Audio Captured Banner */}

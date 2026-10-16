@@ -1,7 +1,7 @@
 {
   "short_name": "RogueFA",
-  "name": "RogueFA — Automated Financial Analytics",
-  "description": "Daily broadcast digests, verified top pick hit rates, and deterministic financial analytics for North American equities.",
+  "name": "RogueFA — Automated Broadcast Aggregation",
+  "description": "Daily broadcast digests, verified top pick hit rates, and deterministic broadcast aggregation for North American equities.",
   "icons": [
     {
       "src": "/logo.png",

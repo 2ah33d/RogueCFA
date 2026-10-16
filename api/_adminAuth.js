@@ -1,13 +1,12 @@
 import crypto from 'crypto';
 
 /* ════════════════════════════════════════════════════════════════
-   /api/admin-auth.js
+   api/_adminAuth.js (Private helper module — not a serverless function)
    Secure backend admin authentication.
    Validates strictly against ADMIN_PASSWORD or API_SECRET from environment.
-   No hardcoded passwords in client bundles, no public modification.
    ════════════════════════════════════════════════════════════════ */
 
-function getAdminSecret() {
+export function getAdminSecret() {
   return process.env.ADMIN_PASSWORD || process.env.API_SECRET || 'roguefa_admin_default_key';
 }
 
@@ -28,15 +27,7 @@ export function verifyAdminToken(token) {
   return signature === expectedSignature;
 }
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+export async function handleAdminAuthRequest(req, res) {
   // GET: Verify existing token or check if admin is configured
   if (req.method === 'GET') {
     const authHeader = req.headers.authorization || '';

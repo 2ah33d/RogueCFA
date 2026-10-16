@@ -1,10 +1,12 @@
 import { supabase } from './_supabaseClient.js';
+import { handleAdminAuthRequest } from './_adminAuth.js';
 
 /* ════════════════════════════════════════════════════════════════
    /api/traffic.js
    Honest, privacy-first, account-free traffic monitoring.
    Zero PII collected: no cookies, no tracking pixels, no raw IPs stored.
    Counts authentic all-time unique visitors and actual page views.
+   Also handles admin authentication routes to stay within Vercel Hobby serverless limits.
    ════════════════════════════════════════════════════════════════ */
 
 const memoryStats = {
@@ -17,10 +19,15 @@ const memoryStats = {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  // Handle admin auth routing to save a serverless function slot on Vercel Hobby plan
+  if (req.query.action === 'auth' || req.body?.action === 'auth' || (req.method === 'POST' && typeof req.body?.password === 'string')) {
+    return handleAdminAuthRequest(req, res);
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);

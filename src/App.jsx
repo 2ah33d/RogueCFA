@@ -173,7 +173,7 @@ export default function App() {
                   RogueFA
                 </span>
                 <span className="hidden xl:inline text-xs text-dim border-l border-white/10 pl-2.5 select-none font-normal">
-                  Automated Financial Analytics
+                  Automated Broadcast Aggregation
                 </span>
               </div>
               <a
@@ -201,7 +201,7 @@ export default function App() {
                   type="button"
                   onClick={() => setShowAdminModal(true)}
                   className="px-2.5 py-1 rounded-full text-xs font-semibold bg-signal-buy/15 text-signal-buy border border-signal-buy/30 hover:bg-signal-buy/25 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer select-none"
-                  title="Admin Console & Traffic Analytics"
+                  title="Admin Console & Traffic Telemetry"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-signal-buy animate-pulse" />
                   <span>Admin Active</span>

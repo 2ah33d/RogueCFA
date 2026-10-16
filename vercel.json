@@ -16,6 +16,8 @@
   },
   "crons": [],
   "rewrites": [
+    { "source": "/api/admin-auth", "destination": "/api/traffic?action=auth" },
+    { "source": "/api/analyst-coldstart", "destination": "/api/analyst-record?action=coldstart" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

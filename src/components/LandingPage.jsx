@@ -14,7 +14,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
           <span className="w-2 h-2 rounded-full bg-signal-buy" />
           <span className="font-semibold text-prime">RogueFA</span>
           <span className="text-dim/50">·</span>
-          <span>Automated Financial Analytics</span>
+          <span>Automated Broadcast Aggregation</span>
         </div>
 
         {/* Signature Proof Stat as Headline */}
@@ -36,7 +36,7 @@ export default function LandingPage({ onLaunchTool, onSelectTicker, onSelectGues
         <div className="flex items-center justify-center gap-2 text-xs text-dim">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span>
-            <strong className="text-prime font-semibold">{trafficStats?.totalVisitors ? trafficStats.totalVisitors.toLocaleString() : '1'}</strong> all-time unique visitor{trafficStats?.totalVisitors === 1 ? '' : 's'} · Privacy-safe analytics
+            <strong className="text-prime font-semibold">{trafficStats?.totalVisitors ? trafficStats.totalVisitors.toLocaleString() : '1'}</strong> all-time unique visitor{trafficStats?.totalVisitors === 1 ? '' : 's'} · Privacy-safe telemetry
           </span>
         </div>
 

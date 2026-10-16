@@ -12,7 +12,7 @@
    ════════════════════════════════════════════════════════════════ */
 
 import { supabase } from './_supabaseClient.js';
-import { verifyAdminToken } from './admin-auth.js';
+import { verifyAdminToken } from './_adminAuth.js';
 import {
   createTimer,
   findRecentMarketCallVideos,
@@ -533,7 +533,7 @@ export default async function handler(req, res) {
             console.log(`[marketcall-process] Cold-start triggered for analyst "${cleanGuest}" (count: ${existingCount || 0})`);
             const protocol = req.headers['x-forwarded-proto'] || 'http';
             const host = req.headers.host || 'localhost:3000';
-            const coldstartUrl = `${protocol}://${host}/api/analyst-coldstart`;
+            const coldstartUrl = `${protocol}://${host}/api/analyst-record?action=coldstart`;
 
             fetch(coldstartUrl, {
               method: 'POST',

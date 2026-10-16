@@ -331,7 +331,7 @@ export default async function handler(req, res) {
             console.log(`[api/ingest] Cold-start triggered for analyst "${cleanGuest}" (count: ${existingCount || 0})`);
             const protocol = req.headers['x-forwarded-proto'] || 'https';
             const host = req.headers.host || 'roguecfa.vercel.app';
-            const coldstartUrl = `${protocol}://${host}/api/analyst-coldstart`;
+            const coldstartUrl = `${protocol}://${host}/api/analyst-record?action=coldstart`;
 
             fetch(coldstartUrl, {
               method: 'POST',

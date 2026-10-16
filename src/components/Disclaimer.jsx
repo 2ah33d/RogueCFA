@@ -4,7 +4,7 @@ import { Lock } from 'lucide-react';
 /**
  * Disclaimer — Persistent legal compliance footer.
  * Enforces Canadian Securities Law regulatory safeguards:
- * 1. Explicitly defines "FA" as "Financial Analytics" (not financial advisor).
+ * 1. Explicitly defines "FA" as "Financial Aggregation" (not financial advisor).
  * 2. Highlights "Not Investment Advice | Delayed Data | Factual Summarization Only".
  * 3. Incorporates privacy-safe audience indicator and discrete Admin Portal access.
  */
@@ -24,7 +24,7 @@ export default function Disclaimer({ onOpenAdmin, trafficStats, className = '' }
 
         {/* Legal Text & FA Definition */}
         <p className="text-[11px] text-dim max-w-4xl leading-relaxed">
-          <strong className="text-prime font-medium">RogueFA (Automated Financial Analytics)</strong> is a computational software and market research technology platform. &ldquo;FA&rdquo; stands for <strong className="text-prime font-medium">Financial Analytics</strong>. RogueFA is not a registered financial advisor, portfolio manager, or broker-dealer under Canadian provincial securities regulations (BCSC, OSC) or international regulatory bodies. All broadcast digests, quotes, and hit rate calculations represent automated extractions of publicly broadcast media for informational, historical, and educational purposes only.
+          <strong className="text-prime font-medium">RogueFA (Automated Public Broadcast Aggregation)</strong> is a computational software and market research technology platform. &ldquo;FA&rdquo; stands for <strong className="text-prime font-medium">Financial Aggregation</strong>. RogueFA is not a registered financial advisor, portfolio manager, or broker-dealer under Canadian provincial securities regulations (BCSC, OSC) or international regulatory bodies. All broadcast digests, quotes, and hit rate calculations represent automated extractions of publicly broadcast media for informational, historical, and educational purposes only.
         </p>
 
         {/* Footer Sub-row: Audience & Admin Portal Trigger */}
@@ -32,7 +32,7 @@ export default function Disclaimer({ onOpenAdmin, trafficStats, className = '' }
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
             <span>
-              {trafficStats?.totalVisitors ? `${trafficStats.totalVisitors.toLocaleString()} all-time unique visitor${trafficStats.totalVisitors === 1 ? '' : 's'}` : 'Privacy-safe automated analytics'}
+              {trafficStats?.totalVisitors ? `${trafficStats.totalVisitors.toLocaleString()} all-time unique visitor${trafficStats.totalVisitors === 1 ? '' : 's'}` : 'Privacy-safe broadcast telemetry'}
             </span>
           </div>
 

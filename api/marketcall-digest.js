@@ -9,7 +9,7 @@
    ════════════════════════════════════════════════════════════════ */
 
 import { supabase } from './_supabaseClient.js';
-import { verifyAdminToken } from './admin-auth.js';
+import { verifyAdminToken } from './_adminAuth.js';
 import {
   createTimer,
   cleanRawTranscript,
