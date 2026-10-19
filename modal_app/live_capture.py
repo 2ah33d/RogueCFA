@@ -114,7 +114,7 @@ def is_canadian_market_holiday(date_str: str) -> bool:
 )
 def run_live_capture(duration_secs: int = 3660, target_date: str = None, skip_rss: bool = True, is_test: bool = False):
     stream_url = PRIMARY_STREAM_URL
-    webhook_url = os.environ.get("VERCEL_WEBHOOK_URL", "https://roguecfa.vercel.app/api/ingest")
+    webhook_url = os.environ.get("VERCEL_WEBHOOK_URL", "https://roguefa.vercel.app/api/ingest")
     supabase_url = os.environ.get("SUPABASE_URL", "")
     supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY", "")
     api_secret = os.environ.get("API_SECRET") or os.environ.get("CRON_SECRET")

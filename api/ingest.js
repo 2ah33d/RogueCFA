@@ -95,7 +95,7 @@ export default async function handler(req, res) {
     try {
       const activeSecret = validSecrets[0] || 'roguecfa_live_secret_key_2026';
       const protocol = req.headers['x-forwarded-proto'] || 'https';
-      const host = req.headers.host || 'roguecfa.vercel.app';
+      const host = req.headers.host || 'roguefa.vercel.app';
       const processUrl = `${protocol}://${host}/api/marketcall-process`;
       console.log(`[api/ingest] Auto-triggering digest pipeline at ${processUrl} for ${todayStr}`);
       const triggerPromise = fetch(processUrl, {
@@ -347,7 +347,7 @@ export default async function handler(req, res) {
           if (!existingCount || existingCount < 10) {
             console.log(`[api/ingest] Cold-start triggered for analyst "${cleanGuest}" (count: ${existingCount || 0})`);
             const protocol = req.headers['x-forwarded-proto'] || 'https';
-            const host = req.headers.host || 'roguecfa.vercel.app';
+            const host = req.headers.host || 'roguefa.vercel.app';
             const coldstartUrl = `${protocol}://${host}/api/analyst-record?action=coldstart`;
 
             fetch(coldstartUrl, {

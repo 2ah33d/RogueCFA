@@ -356,8 +356,11 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
   };
 
   const fetchDigest = useCallback(async (force = false, targetDate = null) => {
+    const isForce = typeof force === 'boolean' ? force : false;
+    const validTargetDate = typeof targetDate === 'string' ? targetDate : null;
+
     /* Token Guard: Generating/renewing uncached digests consumes LLM tokens and is restricted to Admin */
-    if (force && !isAdmin) {
+    if (isForce && !isAdmin) {
       if (onOpenAdmin) onOpenAdmin();
       return;
     }
@@ -373,9 +376,9 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
     let isPollingTrans = false;
 
     try {
-      const payload = { youtubeKey, llmKey, provider, groqKey, force, bypassCache: force };
-      if (targetDate) {
-        payload.episodeDate = targetDate;
+      const payload = { youtubeKey, llmKey, provider, groqKey, force: isForce, bypassCache: isForce };
+      if (validTargetDate) {
+        payload.episodeDate = validTargetDate;
       }
 
       const adminToken = localStorage.getItem('roguefa_admin_token') || '';
@@ -612,7 +615,8 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
     stopPolling();
     setError(null);
     setDigest(null);
-    const activeDate = forcedDate || videoInfo?.episodeDate || selectedDate;
+    const validForced = typeof forcedDate === 'string' ? forcedDate : null;
+    const activeDate = validForced || videoInfo?.episodeDate || selectedDate;
     const target = (activeDate && activeDate !== todayStr) ? activeDate : null;
     fetchDigest(isAdmin ? true : false, target);
   }, [fetchDigest, videoInfo?.episodeDate, selectedDate, todayStr, isAdmin]);
@@ -787,7 +791,7 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <button
                   type="button"
-                  onClick={handleCheckNewer}
+                  onClick={() => handleCheckNewer()}
                   className="inline-flex items-center gap-2 px-5 py-2.5
                              bg-surface-elevated border border-edge
                              text-prime text-sm font-semibold rounded-lg
@@ -841,7 +845,7 @@ export default function DigestView({ isAdmin = false, onOpenAdmin, onScoreTicker
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <button
                   type="button"
-                  onClick={handleCheckNewer}
+                  onClick={() => handleCheckNewer()}
                   className="inline-flex items-center gap-2 px-5 py-2.5
                              bg-surface-elevated border border-edge
                              text-prime text-sm font-semibold rounded-lg

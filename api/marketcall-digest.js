@@ -82,12 +82,6 @@ export default async function handler(req, res) {
       : (process.env.CRON_LLM_KEY || process.env.LLM_KEY || process.env.OPENAI_API_KEY || '');
   }
 
-  if (!llmKey || !provider) {
-    return res.status(400).json({
-      error: 'LLM key and provider are required.',
-    });
-  }
-
   try {
     /* ══════════════════════════════════════════
        Fast path A: Client-provided transcript
@@ -95,6 +89,11 @@ export default async function handler(req, res) {
        — runs inline, typically < 15s (just one LLM call)
        ══════════════════════════════════════════ */
     if (clientTranscript && clientTranscript.length >= 200) {
+      if (!llmKey || !provider) {
+        return res.status(400).json({
+          error: 'LLM key and provider are required to synthesize transcript.',
+        });
+      }
       const timer = createTimer();
       const cleanedTranscript = cleanRawTranscript(clientTranscript);
       if (cleanedTranscript.length < 200) {
@@ -247,6 +246,8 @@ export default async function handler(req, res) {
             } catch (backfillErr) {
               console.warn('[marketcall-digest] YouTube backfill check failed:', backfillErr.message);
             }
+          }
+
           /* 3. Re-reconcile analyst name against authoritative BNN broadcast page / database if currently audio_only */
           if (cached.result && cached.result.digest && (cached.result.digest.nameConfidence === 'audio_only' || !cached.result.digest.nameConfidence)) {
             try {
