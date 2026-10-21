@@ -52,8 +52,19 @@ function AnalystMentionPill({ mention, onSelectGuest }) {
           </span>
         </div>
 
-        {/* Subtle Stance Badge */}
-        <div className="shrink-0 flex items-center">
+        {/* Subtle Horizon & Stance Badges */}
+        <div className="shrink-0 flex items-center gap-1.5 flex-wrap justify-end">
+          {mention.horizon && (
+            <span
+              className={`px-2 py-0.5 text-[9px] font-semibold uppercase rounded-full ${
+                mention.horizon.type === 'long_term'
+                  ? 'bg-indigo-500/15 border border-indigo-500/30 text-indigo-300'
+                  : 'bg-amber-500/15 border border-amber-500/30 text-amber-300'
+              }`}
+            >
+              {mention.horizon.label}
+            </span>
+          )}
           {isPick ? (
             <span className="px-2 py-0.5 text-[9px] font-semibold uppercase rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/90">
               BUY (TOP PICK)
@@ -257,8 +268,6 @@ export default function GoldenGoosePanel({ episodes = [], isAdmin = false, onSel
   }
 
   const rejectedTickers = llmResult?._rejectedTickers || [];
-  const displayGoldenPicks = goldenPicks.slice(0, 4);
-  const displayWarningSells = warningSells.slice(0, 4);
 
   /* Batch Live Prices for all Golden Goose & Warning Sell tickers */
   const gooseTickers = useMemo(() => {
@@ -296,6 +305,56 @@ export default function GoldenGoosePanel({ episodes = [], isAdmin = false, onSel
     });
     return map;
   }, [llmResult, buyHoldCandidates, sellCandidates]);
+
+  /* Sort Golden Picks: Primary by score, Secondary tie-breaker by latest mention date (newest to oldest) */
+  const sortedGoldenPicks = useMemo(() => {
+    return [...goldenPicks].sort((a, b) => {
+      const tickerA = typeof a === 'string' ? a : (a?.ticker || '');
+      const tickerB = typeof b === 'string' ? b : (b?.ticker || '');
+      const candA = candidateMap.get(tickerA);
+      const candB = candidateMap.get(tickerB);
+
+      const scoreA = candA?.weightedScore ?? 0;
+      const scoreB = candB?.weightedScore ?? 0;
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA;
+      }
+
+      const dateA = candA?.latestMentionDate || candA?.mentions?.[0]?.date || '';
+      const dateB = candB?.latestMentionDate || candB?.mentions?.[0]?.date || '';
+      if (dateB !== dateA) {
+        return dateB.localeCompare(dateA);
+      }
+      return (candB?.mentionCount || 0) - (candA?.mentionCount || 0);
+    });
+  }, [goldenPicks, candidateMap]);
+
+  const displayGoldenPicks = sortedGoldenPicks.slice(0, 4);
+
+  /* Sort Warning Sells: Primary by score, Secondary tie-breaker by latest mention date */
+  const sortedWarningSells = useMemo(() => {
+    return [...warningSells].sort((a, b) => {
+      const tickerA = typeof a === 'string' ? a : (a?.ticker || '');
+      const tickerB = typeof b === 'string' ? b : (b?.ticker || '');
+      const candA = candidateMap.get(tickerA);
+      const candB = candidateMap.get(tickerB);
+
+      const scoreA = candA?.weightedScore ?? 0;
+      const scoreB = candB?.weightedScore ?? 0;
+      if (scoreA !== scoreB) {
+        return scoreA - scoreB;
+      }
+
+      const dateA = candA?.latestMentionDate || candA?.mentions?.[0]?.date || '';
+      const dateB = candB?.latestMentionDate || candB?.mentions?.[0]?.date || '';
+      if (dateB !== dateA) {
+        return dateB.localeCompare(dateA);
+      }
+      return (candB?.mentionCount || 0) - (candA?.mentionCount || 0);
+    });
+  }, [warningSells, candidateMap]);
+
+  const displayWarningSells = sortedWarningSells.slice(0, 4);
 
   return (
     <div className="w-full max-w-4xl mx-auto my-6 sm:my-8 space-y-4 sm:space-y-6 font-sans">
@@ -399,6 +458,17 @@ export default function GoldenGoosePanel({ episodes = [], isAdmin = false, onSel
                           <span className="px-2 py-0.5 text-[9px] font-sans font-bold bg-amber-400/15 border border-amber-400/35 text-amber-300 rounded-md">
                             {isAiCurated ? 'AI CONVICTION' : 'SHORTLIST CANDIDATE'}
                           </span>
+                          {cand?.horizon && (
+                            <span
+                              className={`px-2 py-0.5 text-[9px] font-sans font-bold rounded-md ${
+                                cand.horizon.type === 'long_term'
+                                  ? 'bg-indigo-500/15 border border-indigo-500/35 text-indigo-300'
+                                  : 'bg-amber-500/15 border border-amber-500/35 text-amber-300'
+                              }`}
+                            >
+                              {cand.horizon.label.toUpperCase()}
+                            </span>
+                          )}
                         </div>
                         <p className="text-[13px] sm:text-sm text-dim line-clamp-1 mt-0.5">{company}</p>
                       </div>

@@ -220,3 +220,34 @@ test('buildShortlists flags defensive overlay when reasoning specifies covered c
   assert.ok(xyz, 'XYZ qualifies via 2 distinct analysts');
   assert.equal(xyz.isDefensiveOverlay, true, 'XYZ is flagged with isDefensiveOverlay');
 });
+
+test('buildShortlists breaks score ties by placing more recent mention first', () => {
+  const episodes = [
+    {
+      episodeDate: '2026-10-20',
+      guest: 'Analyst A',
+      callerMentions: [{ ticker: 'NEWER', company: 'Newer Stock', stance: 'buy', reasoning: 'Solid long-term investment.' }],
+    },
+    {
+      episodeDate: '2026-10-18',
+      guest: 'Analyst B',
+      callerMentions: [
+        { ticker: 'NEWER', company: 'Newer Stock', stance: 'buy', reasoning: 'Strong balance sheet.' },
+        { ticker: 'OLDER', company: 'Older Stock', stance: 'buy', reasoning: 'Nice business.' },
+      ],
+    },
+    {
+      episodeDate: '2026-10-15',
+      guest: 'Analyst C',
+      callerMentions: [{ ticker: 'OLDER', company: 'Older Stock', stance: 'buy', reasoning: 'Good value.' }],
+    },
+  ];
+
+  const { buyHoldCandidates } = buildShortlists(episodes, 14);
+  assert.equal(buyHoldCandidates.length, 2);
+  // Both NEWER and OLDER have 2 buy mentions (+2.0 score), but NEWER has a mention on Oct 20 vs OLDER on Oct 18
+  assert.equal(buyHoldCandidates[0].ticker, 'NEWER', 'NEWER must rank ahead of OLDER due to more recent mention');
+  assert.equal(buyHoldCandidates[1].ticker, 'OLDER');
+  assert.equal(buyHoldCandidates[0].horizon?.type, 'long_term', 'Detects long-term horizon');
+});
+

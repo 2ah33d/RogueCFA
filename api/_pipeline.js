@@ -1678,6 +1678,13 @@ export const CANONICAL_TICKER_MAP = {
   'MOTOROLA': { ticker: 'MSI', company: 'Motorola Solutions' },
   'ELEMENT FLEET': { ticker: 'EFN', company: 'Element Fleet Management' },
   'ELEMENT FLEET MANAGEMENT': { ticker: 'EFN', company: 'Element Fleet Management' },
+  'BMO EQUAL WEIGHT GLOBAL BASE METALS': { ticker: 'ZMT', company: 'BMO Equal Weight Global Base Metals Hedged to CAD Index ETF' },
+  'BMO EQUAL WEIGHT GLOBAL BASE METALS ETF': { ticker: 'ZMT', company: 'BMO Equal Weight Global Base Metals Hedged to CAD Index ETF' },
+  'BMO METALS ETF': { ticker: 'ZMT', company: 'BMO Equal Weight Global Base Metals Hedged to CAD Index ETF' },
+  'ZMT': { ticker: 'ZMT', company: 'BMO Equal Weight Global Base Metals Hedged to CAD Index ETF' },
+  'ZUE': { ticker: 'ZUE', company: 'BMO S&P 500 Index ETF (CAD Hedged)' },
+  'TPU': { ticker: 'TPU', company: 'TD U.S. Equity Index ETF' },
+  'XSP': { ticker: 'XSP', company: 'iShares Core S&P 500 Index ETF (CAD Hedged)' },
 };
 
 /**
@@ -1703,6 +1710,10 @@ export const CANONICAL_REVERSE_TICKER_MAP = {
   'CMG': { ticker: 'CMG', company: 'Chipotle Mexican Grill' },
   'MSI': { ticker: 'MSI', company: 'Motorola Solutions' },
   'EFN': { ticker: 'EFN', company: 'Element Fleet Management' },
+  'ZMT': { ticker: 'ZMT', company: 'BMO Equal Weight Global Base Metals Hedged to CAD Index ETF' },
+  'ZUE': { ticker: 'ZUE', company: 'BMO S&P 500 Index ETF (CAD Hedged)' },
+  'TPU': { ticker: 'TPU', company: 'TD U.S. Equity Index ETF' },
+  'XSP': { ticker: 'XSP', company: 'iShares Core S&P 500 Index ETF (CAD Hedged)' },
 };
 
 /**
@@ -1773,11 +1784,40 @@ export function sanitizeDigestResult(digest, transcriptText = '') {
     if (matchedCanonical) {
       item.ticker = matchedCanonical.ticker;
       item.company = matchedCanonical.company;
-    } else if (CANONICAL_REVERSE_TICKER_MAP[rawTick]) {
-      item.ticker = CANONICAL_REVERSE_TICKER_MAP[rawTick].ticker;
-      item.company = CANONICAL_REVERSE_TICKER_MAP[rawTick].company;
     } else {
-      item.company = rawComp;
+      // Disambiguate ETF / Index fund mentions from bank common equity
+      const reasoningLower = (item.reasoning || '').toLowerCase();
+      const isEtfOrFund =
+        /\b(etf|fund|index|metals|s&p\s*500|equal weight|hedged|bond fund|ultra short)\b/i.test(rawComp) ||
+        /\b(the etf|this etf|an etf|base metals?|bmo metals|zmt|zue|xsp|tpu|index etf)\b/i.test(reasoningLower);
+
+      if (isEtfOrFund && (rawTick === 'BMO' || rawTick === 'TD' || rawTick === 'RY' || rawTick === 'BNS' || rawTick === 'CM')) {
+        if (/base metals?/i.test(rawComp) || /base metals?/i.test(reasoningLower)) {
+          item.ticker = 'ZMT';
+          item.company = 'BMO Equal Weight Global Base Metals Hedged to CAD Index ETF';
+          return item;
+        }
+        if (/s&p\s*500/i.test(rawComp) || /zue/i.test(reasoningLower)) {
+          item.ticker = 'ZUE';
+          item.company = 'BMO S&P 500 Index ETF (CAD Hedged)';
+          return item;
+        }
+        // Strip bank equity ticker so fund never masquerades as common bank stock
+        item.ticker = '';
+        if (!rawComp || rawComp === 'Bank of Montreal' || rawComp === 'Toronto-Dominion Bank') {
+          item.company = `${rawTick} Index ETF`;
+        } else {
+          item.company = rawComp;
+        }
+        return item;
+      }
+
+      if (CANONICAL_REVERSE_TICKER_MAP[rawTick]) {
+        item.ticker = CANONICAL_REVERSE_TICKER_MAP[rawTick].ticker;
+        item.company = CANONICAL_REVERSE_TICKER_MAP[rawTick].company;
+      } else {
+        item.company = rawComp;
+      }
     }
 
     return item;
@@ -1849,6 +1889,10 @@ STRICT ACCURACY & GROUNDING RULES:
 2. ACCURATE GUEST NAME & FIRM: ${officialGuest ? `The verified official guest name for this episode is "${officialGuest}". ALWAYS set "guest": "${officialGuest}".` : `Extract the guest's real full name and firm accurately from the host's introduction in the broadcast transcript (e.g. "Thanks for joining us today here on Market Call... [Name] with us on the show. [Title/Firm]").`} Do NOT output phonetic Whisper mishearings (e.g. "Julian Nono-Wamden").
 3. ENTITY RESOLUTION & NO INVENTED TICKERS:
    - Silently resolve phonetic ASR errors to real company names & tickers (e.g. "Kojiko" → Cogeco Communications / CCA; "Quebecois" → Quebecor Inc / QBR.B; "Bird Construction" → BDT; "Element Fleet" → EFN).
+   - CRITICAL ETF & FUND SPONSOR RULE:
+     Many ETFs and mutual funds have names beginning with the sponsor bank or manager (e.g. "BMO Equal Weight Global Base Metals ETF", "TD U.S. Equity Index ETF", "BMO S&P 500 Index ETF", "RBC Global Precious Metals").
+     NEVER map an ETF or mutual fund to the sponsor bank's stock ticker (e.g. NEVER assign ticker "BMO" or company "Bank of Montreal" to a BMO ETF; NEVER assign ticker "TD" to a TD ETF; NEVER assign ticker "RY" to an RBC fund)!
+     If the fund has a specific ETF ticker stated or known (e.g. ZMT, ZUE, TPU, XSP, VFV, XLY), use that ETF ticker and the fund's actual name as company. If the specific ETF ticker is not stated or uncertain, use the full fund name as company (e.g. "BMO Equal Weight Global Base Metals Index ETF") and leave ticker as an empty string "".
    - Verify every ticker symbol. If you are not fully certain of a ticker, do not substitute a similar-sounding real ticker from a different company — leave the ticker field as an empty string instead (e.g. do not output CCI or CJR for Cogeco; do not output EFP for Element Fleet Management).
    - ONE ENTRY PER COMPANY: Combine all discussions of the same company into ONE single entry. Never emit multiple duplicate entries or alternative listing tickers for the same underlying company.
 4. STRICT OWNERSHIP, RECOMMENDATION TRUTH & NARRATIVE DIRECTION:

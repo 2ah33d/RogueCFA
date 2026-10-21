@@ -50,6 +50,42 @@ export function weightedScore(mention) {
 }
 
 /**
+ * Detect stated or implied investment time horizon from reasoning text.
+ * Distinguishes long-term compounders / secular growth from short-term rules-based / tactical trades.
+ *
+ * @param {string} text - Analyst commentary/reasoning
+ * @returns {{ type: 'long_term' | 'short_term', label: string } | null}
+ */
+export function detectHorizon(text = '') {
+  if (!text || typeof text !== 'string') return null;
+  const lower = text.toLowerCase();
+
+  // Explicit Short-term / Tactical / Rules-based / Swing trade
+  if (
+    /\b(strictly a trade|short-?term trade|rules-?based trade|here for a good time,? not a long time|swing trade|tactical trade|near-?term trade|take advantage of a bounce|trade this up to|quick trade|trade without a long-?term thesis)\b/i.test(lower)
+  ) {
+    return { type: 'short_term', label: 'Tactical Trade' };
+  }
+
+  // Explicit Long-term Growth / Compounder / Multi-year Investment
+  if (
+    /\b(long-?term growth|long-?term investment|long-?term holding|long-?term compounder|long-?term thesis|core holding|multi-?year (?:story|horizon|run|trend|growth|holding)|buy and hold|secular (?:growth|trend)|5 to 10 years|for the long haul|decade-long|generational|patient investor|patient capital)\b/i.test(lower)
+  ) {
+    return { type: 'long_term', label: 'Long-Term Growth' };
+  }
+
+  // General Long-Term statements (excluding negative contexts)
+  if (
+    /\b(long-?term|compounder|multi-?year)\b/i.test(lower) &&
+    !/\b(not\s+(?:a\s+)?long-?term|no\s+long-?term|without\s+a\s+long-?term|not a long time)\b/i.test(lower)
+  ) {
+    return { type: 'long_term', label: 'Long-Term' };
+  }
+
+  return null;
+}
+
+/**
  * Layer 1: Build deterministic shortlists for Buy/Hold candidates and Sell candidates.
  * No threshold decisions — only counts, weights, and shortlists.
  *
@@ -62,7 +98,7 @@ export function buildShortlists(episodes = [], windowDays = 7) {
     return { buyHoldCandidates: [], sellCandidates: [] };
   }
 
-  const cutoff = Date.now() - windowDays * 86_400_000;
+  const cutoff = new Date(Date.now() - (windowDays + 1) * 86_400_000).setHours(0, 0, 0, 0);
   const tickerAgg = {};
 
   for (const episode of episodes) {
@@ -102,6 +138,8 @@ export function buildShortlists(episodes = [], windowDays = 7) {
 
       const stance = normalizeStance(m.stance || m.rating || (m.mentionType === 'pick' ? 'buy' : 'buy'));
       const epDate = epDateStr || 'Recent';
+      const reasoning = m.reasoning || m.summary || m.thesis || m.commentary || 'Mentioned during broadcast.';
+      const horizon = detectHorizon(reasoning);
 
       /* Dedup key incorporates mentionType:
          Same guest naming a ticker as a pick + answering a caller question = 2 mentions.
@@ -123,7 +161,8 @@ export function buildShortlists(episodes = [], windowDays = 7) {
         date: epDate,
         stance,
         mentionType: m.mentionType,
-        reasoning: m.reasoning || m.summary || m.thesis || m.commentary || 'Mentioned during broadcast.',
+        reasoning,
+        horizon,
         epKey,
       });
       agg.seenEpKeys.add(epKey);
@@ -139,6 +178,10 @@ export function buildShortlists(episodes = [], windowDays = 7) {
       .map((key) => agg.mentions.find((m) => m.epKey === key))
       .filter(Boolean);
 
+    // Sort mentions newest date first
+    deduped.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const latestMentionDate = deduped[0]?.date || 'Recent';
+
     const buyCount = deduped.filter((m) => m && m.stance === 'buy').length;
     const holdCount = deduped.filter((m) => m && m.stance === 'hold').length;
     const sellCount = deduped.filter((m) => m && m.stance === 'sell').length;
@@ -152,6 +195,16 @@ export function buildShortlists(episodes = [], windowDays = 7) {
       /\b(covered\s+calls?|sell\s+(?:short-dated\s+)?calls?|manufacture\s+yield|capped\s+upside|staged\s+limit|downside\s+buffer)\b/i.test(m.reasoning)
     );
 
+    // Aggregate overall horizon for candidate: prefer explicit long-term or tactical
+    const longTermCount = deduped.filter((m) => m.horizon?.type === 'long_term').length;
+    const shortTermCount = deduped.filter((m) => m.horizon?.type === 'short_term').length;
+    let candidateHorizon = null;
+    if (longTermCount > 0) {
+      candidateHorizon = { type: 'long_term', label: 'Long-Term Growth' };
+    } else if (shortTermCount > 0) {
+      candidateHorizon = { type: 'short_term', label: 'Tactical Trade' };
+    }
+
     const candidate = {
       ticker: agg.ticker,
       company: agg.company,
@@ -163,6 +216,8 @@ export function buildShortlists(episodes = [], windowDays = 7) {
       sellCount,
       pickCount,
       isDefensiveOverlay,
+      horizon: candidateHorizon,
+      latestMentionDate,
       weightedScore: Math.round(weightedTotal * 10) / 10,
       mentions: deduped,
     };
@@ -195,8 +250,30 @@ export function buildShortlists(episodes = [], windowDays = 7) {
     }
   }
 
-  buyHoldCandidates.sort((a, b) => b.weightedScore - a.weightedScore);
-  sellCandidates.sort((a, b) => a.weightedScore - b.weightedScore);
+  // Sort: Primary by score, Secondary tie-breaker by latest mention date available (newest to oldest)
+  buyHoldCandidates.sort((a, b) => {
+    if (b.weightedScore !== a.weightedScore) {
+      return b.weightedScore - a.weightedScore;
+    }
+    const dateA = a.latestMentionDate || '';
+    const dateB = b.latestMentionDate || '';
+    if (dateB !== dateA) {
+      return dateB.localeCompare(dateA);
+    }
+    return b.mentionCount - a.mentionCount;
+  });
+
+  sellCandidates.sort((a, b) => {
+    if (a.weightedScore !== b.weightedScore) {
+      return a.weightedScore - b.weightedScore;
+    }
+    const dateA = a.latestMentionDate || '';
+    const dateB = b.latestMentionDate || '';
+    if (dateB !== dateA) {
+      return dateB.localeCompare(dateA);
+    }
+    return b.mentionCount - a.mentionCount;
+  });
 
   return { buyHoldCandidates, sellCandidates, buyCandidates: buyHoldCandidates };
 }
