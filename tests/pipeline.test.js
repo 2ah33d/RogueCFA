@@ -562,5 +562,41 @@ test('resolveAnalystName respects authoritative schedule and database fuzzy fall
   assert.equal(r5.disclaimer, null);
 });
 
+test('buildCoreDigestPrompt includes Top Picks and Past Picks but excludes caller questions', async () => {
+  const { buildCoreDigestPrompt } = await import('../api/_pipeline.js');
+  const prompt = buildCoreDigestPrompt('Mock transcript text', 'BNN Market Call', '2026-10-29');
+
+  assert.ok(prompt.systemPrompt.includes('"pastPicks"'), 'Core prompt must include pastPicks');
+  assert.ok(prompt.systemPrompt.includes('"picks"'), 'Core prompt must include picks');
+  assert.ok(prompt.systemPrompt.includes('DO NOT extract caller Q&A'), 'Core prompt must exclude caller questions');
+});
+
+test('buildCallerMentionsPrompt focuses exclusively on exhaustive caller Q&A', async () => {
+  const { buildCallerMentionsPrompt } = await import('../api/_pipeline.js');
+  const prompt = buildCallerMentionsPrompt('Mock transcript text', 'BNN Market Call', '2026-10-29');
+
+  assert.ok(prompt.systemPrompt.includes('"callerMentions"'), 'Caller prompt must output callerMentions');
+  assert.ok(prompt.systemPrompt.includes('EXHAUSTIVE COVERAGE'), 'Caller prompt must enforce exhaustive coverage');
+  assert.ok(prompt.systemPrompt.includes('DO NOT include the guest\'s official new Top Picks'), 'Caller prompt must omit Top Picks');
+});
+
+test('sanitizeDigestResult detects caller under-extraction when transcript has caller cues', () => {
+  const mockTranscript = `
+    Hi, we have Wendy calling in from Vancouver with a question on Apple.
+    Next caller, we have Bob calling in from Toronto asking about Tesla.
+    Now an email question from Sarah about Amazon.
+    Another email question from David on Microsoft.
+    And a caller on the line from Calgary with a question on Nvidia.
+  `;
+  const sparseDigest = {
+    guest: 'Darren Sissons',
+    callerMentions: [{ ticker: 'AAPL', company: 'Apple', stance: 'buy', reasoning: 'Strong ecosystem.' }],
+    _warnings: [],
+  };
+
+  const result = sanitizeDigestResult(sparseDigest, mockTranscript);
+  assert.ok(result._warnings.some((w) => w.includes('Under-extraction warning')), 'Should flag caller under-extraction warning');
+});
+
 
 

@@ -1861,6 +1861,19 @@ export function sanitizeDigestResult(digest, transcriptText = '') {
         digest._warnings.push(warnMsg);
       }
     }
+
+    // Check for caller mentions under-extraction when transcript contains caller markers
+    if (textToCheck.length > 200) {
+      const callerCues = textToCheck.match(/\b(calling in from|email question|writes|on the line|on the phone|next caller|question on|email from|takes a question)\b/gi) || [];
+      const extractedCallers = Array.isArray(digest.callerMentions) ? digest.callerMentions.length : 0;
+      if (callerCues.length >= 4 && extractedCallers <= 2) {
+        const warnMsg = `Under-extraction warning: broadcast contained at least ${callerCues.length} caller question markers, but only ${extractedCallers} caller mention(s) were extracted.`;
+        console.warn(`[sanitizeDigestResult] ${warnMsg}`);
+        if (!digest._warnings.includes(warnMsg)) {
+          digest._warnings.push(warnMsg);
+        }
+      }
+    }
   }
 
   return digest;
@@ -1931,21 +1944,21 @@ OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
       "stance": "buy"
     }
   ],
-  "callerMentions": [
-    {
-      "ticker": "TICKER",
-      "company": "Company Name",
-      "country": "CAD" | "US",
-      "reasoning": "60-120 words condensing what the guest said about this stock when answering a caller question (buy/sell/hold stance, technicals/fundamentals, risks or valuation concerns).",
-      "stance": "buy" | "sell" | "hold" | "unsure"
-    }
-  ],
   "pastPicks": [
     {
       "ticker": "TICKER",
       "company": "Company Name",
       "country": "CAD" | "US",
       "reasoning": "40-80 words summarizing the past pick evaluation, performance since prior pick date, and current posture (held/exited).",
+      "stance": "buy" | "sell" | "hold" | "unsure"
+    }
+  ],
+  "callerMentions": [
+    {
+      "ticker": "TICKER",
+      "company": "Company Name",
+      "country": "CAD" | "US",
+      "reasoning": "35-65 words condensing what the guest said about this stock when answering a caller question (buy/sell/hold stance, technicals/fundamentals, risks or valuation concerns).",
       "stance": "buy" | "sell" | "hold" | "unsure"
     }
   ],
@@ -1964,33 +1977,207 @@ Produce the structured digest following the exact JSON format specified. Remembe
   return { systemPrompt, userPrompt };
 }
 
+/**
+ * Stage 1 Prompt: Focuses exclusively on Guest, Firm, Episode Focus, Market Outlook,
+ * 3 Top Picks, and 3 Past Picks. Omits caller Q&A to guarantee low output token payload (~1,500 tokens).
+ */
+export function buildCoreDigestPrompt(transcript, videoTitle = '', targetDateStr = '', description = '') {
+  let verifiedVideoTitle = videoTitle || '';
+  if (targetDateStr && verifiedVideoTitle) {
+    const vDate = parseDateFromTitle(verifiedVideoTitle);
+    if (vDate && vDate !== targetDateStr) {
+      verifiedVideoTitle = '';
+    }
+  }
+
+  const officialGuest = verifiedVideoTitle ? extractAnalystFromYouTubeTitle(verifiedVideoTitle, description) : null;
+
+  const systemPrompt = `You are a CFA-level financial research assistant that summarizes BNN Bloomberg MarketCall episodes.
+Your job is to produce a structured, high-accuracy core digest from the episode transcript focusing on the guest, macro outlook, Top Picks, and Past Picks.
+
+STRICT ACCURACY RULES:
+1. ONLY reference what the guest ACTUALLY SAID in the transcript.
+2. GUEST & FIRM: ${officialGuest ? `The verified official guest is "${officialGuest}". ALWAYS set "guest": "${officialGuest}".` : `Extract the guest's real full name and firm accurately from the broadcast.`}
+3. PICKS: MUST contain EXACTLY the guest's NEW official featured Top Picks (typically 3 stocks).
+4. PAST PICKS: MUST contain historical "Past Picks" reviewed during the episode whenever present (typically 3 stocks).
+5. DO NOT extract caller Q&A or audience questions — those are extracted separately in a dedicated caller pass.
+
+OUTPUT FORMAT — valid JSON only, no markdown fences:
+{
+  "guest": "${officialGuest || 'Full Name'}",
+  "firm": "Firm/Title",
+  "episodeFocus": "Stated theme of the episode, e.g. Global and Technology Stocks",
+  "marketOutlook": {
+    "takeaway": "1-2 sentence (20-35 words) high-signal key takeaway summarizing the guest's core market thesis & posture.",
+    "details": "80-140 word detailed breakdown of the guest's market view, interest rate logic, sector allocations, and macroeconomic rationale."
+  },
+  "picks": [
+    {
+      "ticker": "TICKER",
+      "company": "Company Name",
+      "country": "CAD" | "US",
+      "reasoning": "60-120 words condensing the guest's logic for this official top pick — why they like it, catalysts, valuation, or time horizon.",
+      "stance": "buy"
+    }
+  ],
+  "pastPicks": [
+    {
+      "ticker": "TICKER",
+      "company": "Company Name",
+      "country": "CAD" | "US",
+      "reasoning": "40-80 words summarizing the past pick evaluation, performance since prior pick date, and whether the analyst is holding or trimming.",
+      "stance": "buy" | "sell" | "hold" | "unsure"
+    }
+  ],
+  "closingNotes": "Optional 30-60 words of macro risks or concluding thoughts. Empty string if none."
+}`;
+
+  const titleContext = verifiedVideoTitle ? ` titled "${verifiedVideoTitle}"` : (targetDateStr ? ` (${targetDateStr})` : '');
+  const userPrompt = `Here is the transcript from today's BNN Bloomberg MarketCall episode${titleContext}:
+
+---BEGIN TRANSCRIPT---
+${transcript}
+---END TRANSCRIPT---
+
+Produce the structured core digest JSON focusing exclusively on Guest, Firm, Episode Focus, Market Outlook, Top Picks (usually 3), and Past Picks (usually 3). Do NOT include caller questions.`;
+
+  return { systemPrompt, userPrompt };
+}
+
+/**
+ * Stage 2 Prompt: Dedicated exclusively to extracting ALL caller and viewer questions from the broadcast.
+ * Has a 100% token budget dedicated to capturing all 10-18 inquiries with concise rationale.
+ */
+export function buildCallerMentionsPrompt(transcript, videoTitle = '', targetDateStr = '') {
+  let verifiedVideoTitle = videoTitle || '';
+  if (targetDateStr && verifiedVideoTitle) {
+    const vDate = parseDateFromTitle(verifiedVideoTitle);
+    if (vDate && vDate !== targetDateStr) {
+      verifiedVideoTitle = '';
+    }
+  }
+
+  const systemPrompt = `You are a CFA-level financial research assistant that extracts caller and audience questions from BNN Bloomberg MarketCall episodes.
+Your job is to scan the transcript from beginning to end and extract EVERY stock, company, or sector asked by phone callers, viewers, or email inquiries.
+
+STRICT EXTRACTION RULES:
+1. EXHAUSTIVE COVERAGE: Capture EVERY caller/email question throughout the broadcast. Episodes typically have 10 to 18 caller inquiries. Do NOT stop after the first few callers.
+2. DO NOT include the guest's official new Top Picks (those are introduced in a separate Top Picks segment).
+3. DO NOT include Past Picks reviews (stocks recommended months ago that are being reviewed).
+4. Combine duplicate inquiries about the exact same company into one entry.
+5. Provide a crisp 40-75 word summary for each caller inquiry explaining the guest's view, posture, and key risks/catalysts.
+6. STANCE TAXONOMY: "buy", "sell", "hold", or "unsure".
+
+OUTPUT FORMAT — valid JSON only, no markdown fences:
+{
+  "callerMentions": [
+    {
+      "ticker": "TICKER",
+      "company": "Company Name",
+      "country": "CAD" | "US",
+      "reasoning": "40-75 words condensing what the guest said answering this specific caller/email question.",
+      "stance": "buy" | "sell" | "hold" | "unsure"
+    }
+  ]
+}`;
+
+  const titleContext = verifiedVideoTitle ? ` titled "${verifiedVideoTitle}"` : (targetDateStr ? ` (${targetDateStr})` : '');
+  const userPrompt = `Here is the transcript from today's BNN Bloomberg MarketCall episode${titleContext}:
+
+---BEGIN TRANSCRIPT---
+${transcript}
+---END TRANSCRIPT---
+
+Scan the ENTIRE transcript from start to finish and extract ALL caller and email inquiries. Return valid JSON containing the "callerMentions" array only.`;
+
+  return { systemPrompt, userPrompt };
+}
+
+/**
+ * Orchestrates two-stage parallel digest synthesis:
+ * Stage 1: Core macro, Top Picks & Past Picks (~1,500 tokens).
+ * Stage 2: Exhaustive Caller Mentions (~3,000-4,000 tokens).
+ * Merges both results into a complete, non-truncated digest.
+ */
+export async function synthesizeCompleteDigest({
+  provider = 'claude',
+  llmKey,
+  transcript,
+  videoTitle = '',
+  targetDateStr = '',
+  timer,
+}) {
+  const activeProvider = provider || 'claude';
+  const corePrompt = buildCoreDigestPrompt(transcript, videoTitle, targetDateStr);
+  const callerPrompt = buildCallerMentionsPrompt(transcript, videoTitle, targetDateStr);
+
+  let coreRaw = null;
+  let callerRaw = null;
+
+  try {
+    [coreRaw, callerRaw] = await Promise.all([
+      callLLM(activeProvider, llmKey, corePrompt.systemPrompt, corePrompt.userPrompt, timer, 'Core LLM synthesis'),
+      callLLM(activeProvider, llmKey, callerPrompt.systemPrompt, callerPrompt.userPrompt, timer, 'Caller Q&A LLM synthesis'),
+    ]);
+  } catch (parallelErr) {
+    console.warn('[synthesizeCompleteDigest] Parallel LLM synthesis encountered an error, falling back to unified prompt:', parallelErr.message);
+    const unifiedPrompt = buildDigestPrompt(transcript, videoTitle, targetDateStr);
+    const unifiedRaw = await callLLM(activeProvider, llmKey, unifiedPrompt.systemPrompt, unifiedPrompt.userPrompt, timer, 'Unified LLM synthesis');
+    const unifiedDigest = extractJSON(unifiedRaw.text);
+    if (unifiedRaw.usage) unifiedDigest.usage = unifiedRaw.usage;
+    return unifiedDigest;
+  }
+
+  const coreDigest = extractJSON(coreRaw.text);
+  let callerDigest = { callerMentions: [] };
+  try {
+    if (callerRaw && callerRaw.text) {
+      callerDigest = extractJSON(callerRaw.text);
+    }
+  } catch (err) {
+    console.warn('[synthesizeCompleteDigest] Failed to parse caller mentions JSON, falling back to empty list:', err.message);
+  }
+
+  const mergedDigest = {
+    ...coreDigest,
+    callerMentions: Array.isArray(callerDigest.callerMentions) ? callerDigest.callerMentions : [],
+    usage: {
+      input_tokens: (coreRaw.usage?.input_tokens || 0) + (callerRaw?.usage?.input_tokens || 0),
+      output_tokens: (coreRaw.usage?.output_tokens || 0) + (callerRaw?.usage?.output_tokens || 0),
+    },
+  };
+
+  return mergedDigest;
+}
+
 /* ════════════════════════════════════════════════════════════════
    LLM routing — mirrors api/score.js patterns
    ════════════════════════════════════════════════════════════════ */
 
-export async function callLLM(provider, key, systemPrompt, userPrompt, timer) {
-  timer?.start('LLM synthesis');
+export async function callLLM(provider = 'claude', key, systemPrompt, userPrompt, timer, label = 'LLM synthesis') {
+  timer?.start(label);
   let result;
+  const activeProvider = provider || 'claude';
   try {
-    switch (provider) {
-      case 'gemini':
-        result = await callGemini(key, systemPrompt, userPrompt);
-        break;
+    switch (activeProvider) {
       case 'claude':
         result = await callClaude(key, systemPrompt, userPrompt);
+        break;
+      case 'gemini':
+        result = await callGemini(key, systemPrompt, userPrompt);
         break;
       case 'openai':
         result = await callOpenAI(key, systemPrompt, userPrompt);
         break;
       default:
-        throw new Error(`Unknown provider: ${provider}`);
+        throw new Error(`Unknown provider: ${activeProvider}`);
     }
   } catch (primaryErr) {
-    console.warn(`[callLLM] Primary provider '${provider}' failed: ${primaryErr.message}. Attempting fallback providers...`);
+    console.warn(`[callLLM] Primary provider '${activeProvider}' failed: ${primaryErr.message}. Attempting fallback providers...`);
 
     // Fallback 1: If primary was Claude or OpenAI, try Gemini if a key is available
-    const geminiKey = process.env.GEMINI_API_KEY || (key && !key.startsWith('sk-ant-') && !key.startsWith('sk-') ? key : null);
-    if (provider !== 'gemini' && geminiKey) {
+    const geminiKey = process.env.GEMINI_API_KEY || (key && !key.startsWith('sk-ant-') && !key.startsWith('sk-proj-') ? key : null);
+    if (activeProvider !== 'gemini' && geminiKey) {
       try {
         console.log('[callLLM] Falling back to Gemini...');
         result = await callGemini(geminiKey, systemPrompt, userPrompt);
@@ -2001,7 +2188,7 @@ export async function callLLM(provider, key, systemPrompt, userPrompt, timer) {
 
     // Fallback 2: Try OpenAI if an OpenAI key is available
     const openaiKey = process.env.OPENAI_API_KEY || (key && key.startsWith('sk-proj-') ? key : null);
-    if (!result && provider !== 'openai' && openaiKey) {
+    if (!result && activeProvider !== 'openai' && openaiKey) {
       try {
         console.log('[callLLM] Falling back to OpenAI...');
         result = await callOpenAI(openaiKey, systemPrompt, userPrompt);
@@ -2011,65 +2198,78 @@ export async function callLLM(provider, key, systemPrompt, userPrompt, timer) {
     }
 
     if (!result) {
-      timer?.end('LLM synthesis');
+      timer?.end(label);
       throw primaryErr;
     }
   }
-  timer?.end('LLM synthesis');
+  timer?.end(label);
   return result; /* { text: string, usage: { input_tokens, output_tokens } } */
 }
 
 async function callGemini(key, systemPrompt, userPrompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ parts: [{ text: userPrompt }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: 8192,
-        thinkingConfig: {
-          thinkingBudget: 0,
-        },
-      },
-    }),
-    signal: AbortSignal.timeout(150000),
-  });
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  let lastErr = null;
 
-  if (!response.ok) {
-    const errBody = await response.json().catch(() => ({}));
-    throw Object.assign(
-      new Error(`Gemini API error: ${errBody.error?.message || response.statusText}`),
-      { status: response.status }
-    );
-  }
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ parts: [{ text: userPrompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
+          },
+        }),
+        signal: AbortSignal.timeout(150000),
+      });
 
-  const data = await response.json();
-  const parts = data.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    const textPart = parts.find((p) => typeof p.text === 'string');
-    if (textPart) {
-      const usage = data.usageMetadata
-        ? {
-            input_tokens: data.usageMetadata.promptTokenCount || 0,
-            output_tokens: data.usageMetadata.candidatesTokenCount || 0,
-          }
-        : null;
-      return { text: textPart.text, usage };
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw Object.assign(
+          new Error(`Gemini API error (${model}): ${errBody.error?.message || response.statusText}`),
+          { status: response.status }
+        );
+      }
+
+      const data = await response.json();
+      const parts = data.candidates?.[0]?.content?.parts;
+      if (Array.isArray(parts)) {
+        const textPart = parts.find((p) => typeof p.text === 'string' && !p.thought);
+        if (textPart) {
+          const usage = data.usageMetadata
+            ? {
+                input_tokens: data.usageMetadata.promptTokenCount || 0,
+                output_tokens: data.usageMetadata.candidatesTokenCount || 0,
+              }
+            : null;
+          return { text: textPart.text, usage };
+        }
+      }
+      throw new Error(`Gemini (${model}) returned no text content.`);
+    } catch (err) {
+      lastErr = err;
+      if (model === models[models.length - 1]) throw lastErr;
     }
   }
-  throw new Error('Gemini returned no text content.');
+
+  throw lastErr || new Error('Gemini API call failed.');
 }
 
 async function callClaude(key, systemPrompt, userPrompt) {
   const models = [
     'claude-haiku-5-5',
+    'claude-3-5-haiku-latest',
+    'claude-3-5-haiku-20241022',
+    'claude-3-haiku-20240307',
     'claude-sonnet-5',
     'claude-3-5-sonnet-latest',
-    'claude-3-5-haiku-latest',
-    'claude-3-haiku-20240307',
   ];
 
   let lastErr = null;
@@ -2099,6 +2299,10 @@ async function callClaude(key, systemPrompt, userPrompt) {
 
     if (response.ok) {
       const data = await response.json().catch(() => ({}));
+      if (data.stop_reason === 'max_tokens') {
+        console.warn(`[callClaude] Output reached max_tokens (8192) ceiling with model ${model}. Response was truncated by Anthropic.`);
+      }
+
       const textBlocks = data.content?.filter((b) => b.type === 'text' && typeof b.text === 'string') || [];
       let fullText = textBlocks.map((b) => b.text).join('\n').trim();
 
@@ -2122,7 +2326,7 @@ async function callClaude(key, systemPrompt, userPrompt) {
               output_tokens: data.usage.output_tokens || 0,
             }
           : null;
-        return { text: fullText, usage };
+        return { text: fullText, usage, stopReason: data.stop_reason };
       }
 
       console.warn(`[callClaude] Model ${model} returned HTTP 200 with no text content. stop_reason: ${data.stop_reason}, block types: ${data.content?.map(c => c.type).join(', ')}`);

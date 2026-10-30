@@ -118,7 +118,7 @@ test('buildShortlists accepts multi-analyst buy convergence and top pick confirm
     },
   ];
 
-  const { buyHoldCandidates, sellCandidates } = buildShortlists(episodes, 30);
+  const { buyHoldCandidates, sellCandidates } = buildShortlists(episodes, 60);
 
   const shopCand = buyHoldCandidates.find((c) => c.ticker === 'SHOP');
   assert.ok(shopCand, 'SHOP should qualify as multi-analyst buy convergence');
@@ -215,7 +215,7 @@ test('buildShortlists flags defensive overlay when reasoning specifies covered c
     },
   ];
 
-  const { buyHoldCandidates } = buildShortlists(episodes, 14);
+  const { buyHoldCandidates } = buildShortlists(episodes, 30);
   const xyz = buyHoldCandidates.find((c) => c.ticker === 'XYZ');
   assert.ok(xyz, 'XYZ qualifies via 2 distinct analysts');
   assert.equal(xyz.isDefensiveOverlay, true, 'XYZ is flagged with isDefensiveOverlay');

@@ -21,6 +21,7 @@ import {
   fetchSupabaseStorageAudioFallback,
   cleanRawTranscript,
   buildDigestPrompt,
+  synthesizeCompleteDigest,
   callLLM,
   extractJSON,
   getLatestMarketCallDateStr,
@@ -99,12 +100,12 @@ export default async function handler(req, res) {
 
     if (body.llmKey && body.llmKey.trim()) {
       llmKey = body.llmKey.trim();
-      provider = body.provider || 'gemini';
+      provider = body.provider || 'claude';
     } else {
-      provider = process.env.CRON_LLM_PROVIDER || process.env.LLM_PROVIDER || 'gemini';
+      provider = process.env.CRON_LLM_PROVIDER || process.env.LLM_PROVIDER || 'claude';
       llmKey = provider === 'groq'
         ? (process.env.CRON_GROQ_KEY || process.env.CRON_LLM_KEY || process.env.LLM_KEY)
-        : (process.env.CRON_LLM_KEY || process.env.LLM_KEY || process.env.OPENAI_API_KEY || '');
+        : (process.env.ANTHROPIC_API_KEY || process.env.CRON_LLM_KEY || process.env.LLM_KEY || '');
     }
 
     if (isDebugSecret) {
@@ -389,18 +390,16 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ── Step 6: Build prompt & call LLM ── */
-    const { systemPrompt, userPrompt } = buildDigestPrompt(
-      cleanedTranscript,
-      selectedVideo.videoTitle,
-      selectedVideo.description,
-      targetDateStr
-    );
-    const rawLLMResponse = await callLLM(provider, llmKey, systemPrompt, userPrompt, timer);
-    const llmText = typeof rawLLMResponse === 'string' ? rawLLMResponse : rawLLMResponse.text;
-    const llmUsage = typeof rawLLMResponse === 'object' ? rawLLMResponse.usage : null;
-    /* Sanitize entities, tickers, analyst name & attach metadata */
-    let digest = extractJSON(llmText);
+    /* ── Step 6: Build prompt & call LLM (Two-Stage Synthesis with Claude Haiku 5.5) ── */
+    let digest = await synthesizeCompleteDigest({
+      provider,
+      llmKey,
+      transcript: cleanedTranscript,
+      videoTitle: selectedVideo.videoTitle,
+      targetDateStr,
+      timer,
+    });
+    const llmUsage = digest?.usage || null;
 
     const hasPicksOrMentions = Array.isArray(digest?.picks) || Array.isArray(digest?.top_picks) || Array.isArray(digest?.callerMentions);
     if (!digest || !digest.guest || !hasPicksOrMentions) {
@@ -409,7 +408,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ jobId, status: 'error', error: errMsg });
     }
 
-    digest = sanitizeDigestResult(digest);
+    digest = sanitizeDigestResult(digest, cleanedTranscript);
     if (digest && digest.guest) {
       /* Check BNN Top Picks article for authoritative analyst name (best-effort, 3s timeout) */
       let bnnArticleGuest = null;

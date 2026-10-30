@@ -14,6 +14,7 @@ import {
   createTimer,
   cleanRawTranscript,
   buildDigestPrompt,
+  synthesizeCompleteDigest,
   callLLM,
   extractJSON,
   getLatestMarketCallDateStr,
@@ -22,6 +23,7 @@ import {
   parseDateFromTitle,
   resolveAnalystName,
   sanitizeAnalystName,
+  sanitizeDigestResult,
   fetchBnnTopPicksAnalyst,
 } from './_pipeline.js';
 
@@ -74,12 +76,12 @@ export default async function handler(req, res) {
   let provider, llmKey;
   if (bodyLlmKey && bodyLlmKey.trim()) {
     llmKey = bodyLlmKey.trim();
-    provider = bodyProvider || 'gemini';
+    provider = bodyProvider || 'claude';
   } else {
-    provider = process.env.CRON_LLM_PROVIDER || process.env.LLM_PROVIDER || 'gemini';
+    provider = process.env.CRON_LLM_PROVIDER || process.env.LLM_PROVIDER || 'claude';
     llmKey = provider === 'groq'
       ? (process.env.CRON_GROQ_KEY || process.env.CRON_LLM_KEY || process.env.LLM_KEY)
-      : (process.env.CRON_LLM_KEY || process.env.LLM_KEY || process.env.OPENAI_API_KEY || '');
+      : (process.env.ANTHROPIC_API_KEY || process.env.CRON_LLM_KEY || process.env.LLM_KEY || '');
   }
 
   try {
@@ -103,17 +105,23 @@ export default async function handler(req, res) {
         });
       }
 
-      const { systemPrompt, userPrompt } = buildDigestPrompt(cleanedTranscript, clientVideoTitle || '');
-      const rawLLMResponse = await callLLM(provider, llmKey, systemPrompt, userPrompt, timer);
-      const llmText = typeof rawLLMResponse === 'string' ? rawLLMResponse : rawLLMResponse.text;
-      const llmUsage = typeof rawLLMResponse === 'object' ? rawLLMResponse.usage : null;
-      const digest = extractJSON(llmText);
+      let digest = await synthesizeCompleteDigest({
+        provider,
+        llmKey,
+        transcript: cleanedTranscript,
+        videoTitle: clientVideoTitle || '',
+        timer,
+      });
+      const llmUsage = digest?.usage || null;
 
       if (!digest || !digest.guest) {
         return res.status(422).json({
           error: 'LLM returned an unparseable digest. Try again.',
         });
       }
+
+      /* Sanitize entities, tickers, and detect under-extraction */
+      digest = sanitizeDigestResult(digest, cleanedTranscript);
 
       /* Sanitize analyst name against YouTube video title & phonetic mishearing dictionary */
       if (digest && digest.guest) {
